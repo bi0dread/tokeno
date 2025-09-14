@@ -18,6 +18,7 @@ A comprehensive Go package for creating and validating both JWT and opaque token
   - [Opaque Tokens](#-opaque-tokens)
   - [Key Rotation](#-key-rotation)
   - [Builder Pattern](#️-builder-pattern)
+  - [Refresh Tokens](#-refresh-tokens)
   - [Auto-Detection](#-auto-detection)
 - [📖 Complete Example](#-complete-example)
 - [🔄 Key Rotation](#key-rotation)
@@ -38,14 +39,18 @@ import (
 )
 
 func main() {
-    // Create TokenManager
+    // Create TokenManager with refresh tokens
     tm := tokeno.NewTokenManagerBuilder().
         WithJWTSecret([]byte("your-secret-key")).
         WithOpaqueSecret([]byte("your-opaque-secret")).
         WithDefaultExpiration(24 * time.Hour).
+        WithRefreshConfig(&tokeno.TokenRefreshConfig{
+            MaxRefreshAttempts: 5,
+            RefreshTokenExpiry: 7 * 24 * time.Hour,
+        }).
         Build()
 
-    // Create JWT token
+    // Create JWT token with refresh token
     jwtResult, err := tm.NewToken().
         WithIssuer("my-service").
         WithSubject("user123").
@@ -57,6 +62,7 @@ func main() {
     }
 
     fmt.Printf("JWT Token: %s\n", jwtResult.Token)
+    fmt.Printf("Refresh Token: %s\n", jwtResult.RefreshToken)
 
     // Validate token
     validated, err := tm.ValidateJWTToken(jwtResult.Token)
@@ -65,6 +71,14 @@ func main() {
     }
 
     fmt.Printf("Validated user: %s\n", validated.Subject)
+
+    // Use refresh token to get new access token
+    newResult, err := tm.RefreshToken(jwtResult.RefreshToken)
+    if err != nil {
+        panic(err)
+    }
+
+    fmt.Printf("New Access Token: %s\n", newResult.Token)
 }
 ```
 
@@ -73,6 +87,7 @@ func main() {
 ### 🔑 Token Support
 - **JWT Tokens**: Full RFC 7519 compliance with standard claims
 - **Opaque Tokens**: Custom JSON-based tokens with cryptographic signatures
+- **Refresh Tokens**: Automatic refresh token generation with security controls
 - **Auto-Detection**: Automatic token type detection and validation
 - **Dual Management**: Single API for both token types
 
@@ -81,6 +96,7 @@ func main() {
 - **Key Generation**: Built-in utilities for generating secure key pairs
 - **Key Rotation**: Automatic key rotation with persistence and smart cleanup
 - **Token Tracking**: Track active tokens to prevent premature key deletion
+- **Refresh Security**: Configurable attempt limits and expiration for refresh tokens
 
 ### 🛠️ Developer Experience
 - **Builder Pattern**: Fluent configuration API
@@ -98,7 +114,6 @@ func main() {
 
 ```bash
 go get github.com/bi0dread/tokeno
-go mod tidy
 ```
 
 ## 📚 Usage
@@ -214,7 +229,147 @@ tm := tokeno.NewTokenManagerBuilder().
     WithOpaqueKeyPair(ecdsaKeyPair).
     WithDefaultExpiration(12 * time.Hour).
     WithOpaqueTokenLength(64).
+    WithRefreshConfig(&tokeno.TokenRefreshConfig{
+        RefreshThreshold:   30 * time.Minute,
+        MaxRefreshAttempts: 5,
+        RefreshTokenExpiry: 7 * 24 * time.Hour,
+    }).
     Build()
+```
+
+### 🔄 Refresh Tokens
+
+Tokeno supports automatic refresh token generation with configurable attempt limits and security controls.
+
+#### Basic Refresh Token Usage
+
+```go
+// Create TokenManager with refresh configuration
+config := &tokeno.TokenManagerConfig{
+    JWTSecretKey: []byte("your-jwt-secret"),
+    JWTMethod:    tokeno.SigningMethodHS256,
+    RefreshConfig: &tokeno.TokenRefreshConfig{
+        RefreshThreshold:   30 * time.Minute,   // Refresh 30 minutes before expiry
+        MaxRefreshAttempts: 5,                  // Allow 5 refresh attempts
+        RefreshGracePeriod: 5 * time.Minute,    // 5 minute grace period
+        RefreshTokenLength: 64,                 // 64 character refresh tokens
+        RefreshTokenExpiry: 7 * 24 * time.Hour, // Refresh tokens valid for 7 days
+    },
+}
+
+tm := tokeno.NewTokenManager(config)
+
+// Create token with automatic refresh token
+result, err := tm.NewToken().
+    WithIssuer("my-service").
+    WithSubject("user123").
+    WithExpiration(time.Now().Add(1 * time.Hour)).
+    CreateJWTWithHMAC(tokeno.SigningMethodHS256)
+
+if err != nil {
+    panic(err)
+}
+
+fmt.Printf("Access Token: %s\n", result.Token)
+fmt.Printf("Refresh Token: %s\n", result.RefreshToken)
+```
+
+#### Using Refresh Tokens
+
+```go
+// Use refresh token to get new access token
+newResult, err := tm.RefreshToken(result.RefreshToken)
+if err != nil {
+    panic(err)
+}
+
+fmt.Printf("New Access Token: %s\n", newResult.Token)
+fmt.Printf("New Refresh Token: %s\n", newResult.RefreshToken)
+```
+
+#### Refresh Token Configuration
+
+The `TokenRefreshConfig` struct provides comprehensive control over refresh token behavior:
+
+```go
+type TokenRefreshConfig struct {
+    RefreshThreshold   time.Duration // When to start refreshing (e.g., 1 hour before expiry)
+    MaxRefreshAttempts int           // Maximum refresh attempts
+    RefreshGracePeriod time.Duration // Grace period for refresh
+    RefreshTokenLength int           // Length of refresh token (default: 64)
+    RefreshTokenExpiry time.Duration // Refresh token expiration (default: 7 days)
+}
+```
+
+#### MaxRefreshAttempts Security
+
+The `MaxRefreshAttempts` feature provides security controls for refresh token usage:
+
+```go
+// Different MaxRefreshAttempts configurations
+configs := []struct {
+    name        string
+    maxAttempts int
+    description string
+}{
+    {"Unlimited", 0, "No limit on refresh attempts"},
+    {"Limited", 5, "Allow 5 refresh attempts"},
+    {"Strict", 1, "Allow only 1 refresh attempt"},
+    {"Disabled", -1, "No refresh attempts allowed"},
+}
+
+for _, cfg := range configs {
+    refreshConfig := &tokeno.TokenRefreshConfig{
+        MaxRefreshAttempts: cfg.maxAttempts,
+        RefreshTokenExpiry: 24 * time.Hour,
+    }
+    
+    tm := tokeno.NewTokenManagerBuilder().
+        WithJWTSecret([]byte("secret")).
+        WithRefreshConfig(refreshConfig).
+        Build()
+    
+    // Use the TokenManager...
+}
+```
+
+#### Refresh Token with Builder Pattern
+
+```go
+// Create TokenManager with refresh config using builder
+tm := tokeno.NewTokenManagerBuilder().
+    WithJWTSecret([]byte("your-secret")).
+    WithJWTMethod(tokeno.SigningMethodHS256).
+    WithRefreshConfig(&tokeno.TokenRefreshConfig{
+        RefreshThreshold:   1 * time.Hour,
+        MaxRefreshAttempts: 3,
+        RefreshTokenExpiry: 24 * time.Hour,
+    }).
+    Build()
+
+// Create token with refresh token
+result, err := tm.NewToken().
+    WithIssuer("my-service").
+    WithSubject("user123").
+    WithExpiration(time.Now().Add(2 * time.Hour)).
+    CreateJWTWithHMAC(tokeno.SigningMethodHS256)
+```
+
+#### Refresh Token Security Features
+
+- **Attempt Limiting**: Control how many times a refresh token can be used
+- **Automatic Expiration**: Refresh tokens expire independently of access tokens
+- **Embedded Access Token**: Refresh tokens contain the original access token for validation
+- **Incremental Counter**: Each refresh increments an attempt counter for security tracking
+- **Grace Period**: Configurable grace period for refresh operations
+
+#### Refresh Token Examples
+
+```bash
+# Run refresh token examples
+go run cmd/refresh_config_builder_example/main.go
+go run cmd/max_refresh_attempts_example/main.go
+go run cmd/embedded_refresh_example/main.go
 ```
 
 ### 🔍 Auto-Detection
@@ -679,12 +834,13 @@ The `TokenManagerConfig` struct configures the TokenManager:
 
 ```go
 type TokenManagerConfig struct {
-    JWTSecretKey      []byte        // Secret key for HMAC JWT tokens
-    OpaqueSecretKey   []byte        // Secret key for opaque token signatures
-    OpaqueTokenLength int           // Length of opaque token signatures (default: 32)
-    JWTKeyPair        *KeyPair      // Optional key pair for asymmetric JWT tokens
-    OpaqueKeyPair     *KeyPair      // Optional key pair for asymmetric opaque tokens
-    DefaultExpiration time.Duration // Default token expiration (default: 24h)
+    JWTSecretKey      []byte                // Secret key for HMAC JWT tokens
+    OpaqueSecretKey   []byte                // Secret key for opaque token signatures
+    OpaqueTokenLength int                   // Length of opaque token signatures (default: 32)
+    JWTKeyPair        *KeyPair              // Optional key pair for asymmetric JWT tokens
+    OpaqueKeyPair     *KeyPair              // Optional key pair for asymmetric opaque tokens
+    DefaultExpiration time.Duration         // Default token expiration (default: 24h)
+    RefreshConfig     *TokenRefreshConfig   // Optional refresh token configuration
 }
 ```
 
@@ -712,10 +868,11 @@ The `TokenResult` struct contains the result of token creation:
 
 ```go
 type TokenResult struct {
-    Token     string    `json:"token"`      // The generated token string
-    Type      TokenType `json:"type"`       // Token type (jwt or opaque)
-    ExpiresAt time.Time `json:"expires_at"` // Token expiration time
-    IssuedAt  time.Time `json:"issued_at"`  // Token issued time
+    Token        string    `json:"token"`         // The generated access token string
+    RefreshToken string    `json:"refresh_token"` // The generated refresh token string (if configured)
+    Type         TokenType `json:"type"`          // Token type (jwt or opaque)
+    ExpiresAt    time.Time `json:"expires_at"`    // Token expiration time
+    IssuedAt     time.Time `json:"issued_at"`     // Token issued time
 }
 ```
 
@@ -814,6 +971,7 @@ Each key has metadata including:
 - `TokenManagerBuilder.WithOpaqueKeyPair(keyPair *KeyPair) *TokenManagerBuilder` - Sets opaque key pair
 - `TokenManagerBuilder.WithDefaultExpiration(duration time.Duration) *TokenManagerBuilder` - Sets default expiration
 - `TokenManagerBuilder.WithOpaqueTokenLength(length int) *TokenManagerBuilder` - Sets opaque token length
+- `TokenManagerBuilder.WithRefreshConfig(config *TokenRefreshConfig) *TokenManagerBuilder` - Sets refresh token configuration
 - `TokenManagerBuilder.Build() *TokenManager` - Builds the TokenManager
 
 ##### Method Chaining for Token Creation
@@ -838,6 +996,7 @@ Each key has metadata including:
 - `ValidateJWTToken(token string) (*TokenRequest, error)` - Validates a JWT token (auto-detects method)
 - `ValidateOpaqueToken(token string) (*TokenRequest, error)` - Validates an opaque token (auto-detects method)
 - `ValidateToken(token string) (*TokenRequest, error)` - Auto-detects and validates any token type
+- `RefreshToken(refreshToken string) (*TokenResult, error)` - Refreshes an access token using a refresh token
 
 ##### TokenManager Validation Methods
 - `ValidateJWTWithHMAC(token string, method SigningMethod) (*TokenRequest, error)` - Validates a JWT token with HMAC
@@ -890,6 +1049,7 @@ go test -v -cover
 
 - ✅ **JWT Token Tests**: 15+ tests covering all signing methods
 - ✅ **Opaque Token Tests**: 10+ tests for custom token functionality
+- ✅ **Refresh Token Tests**: 10+ tests for refresh token functionality and security
 - ✅ **KeyManager Tests**: 9+ tests for key rotation and persistence
 - ✅ **TokenBuilder Tests**: 15+ tests for method chaining
 - ✅ **Integration Tests**: End-to-end functionality testing
@@ -903,17 +1063,13 @@ go run cmd/example/main.go
 
 # Key rotation example
 go run cmd/key_rotation_example/main.go
+
+# Refresh token examples
+go run cmd/refresh_config_builder_example/main.go
+go run cmd/max_refresh_attempts_example/main.go
+go run cmd/embedded_refresh_example/main.go
 ```
 
-## 🤝 Contributing
-
-We welcome contributions! Please see our contributing guidelines:
-
-1. **Fork** the repository
-2. **Create** a feature branch (`git checkout -b feature/amazing-feature`)
-3. **Commit** your changes (`git commit -m 'Add amazing feature'`)
-4. **Push** to the branch (`git push origin feature/amazing-feature`)
-5. **Open** a Pull Request
 
 ### Development Setup
 

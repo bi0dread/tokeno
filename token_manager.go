@@ -197,6 +197,12 @@ func (b *TokenManagerBuilder) WithOpaqueTokenLength(length int) *TokenManagerBui
 	return b
 }
 
+// WithRefreshConfig sets the token refresh configuration
+func (b *TokenManagerBuilder) WithRefreshConfig(config *TokenRefreshConfig) *TokenManagerBuilder {
+	b.config.RefreshConfig = config
+	return b
+}
+
 // Build creates the TokenManager with the configured settings
 func (b *TokenManagerBuilder) Build() *TokenManager {
 	return NewTokenManager(b.config)

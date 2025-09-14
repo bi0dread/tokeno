@@ -301,7 +301,7 @@ func (tb *TokenBuilder) CreateJWTWithHMAC(method SigningMethod) (*TokenResult, e
 	// Generate embedded refresh token if refresh config is available
 	var refreshToken string
 	if tb.tm.config.RefreshConfig != nil {
-		refreshToken, err = tb.tm.generateEmbeddedRefreshJWT(tb.req, tokenString)
+		refreshToken, err = tb.tm.generateEmbeddedRefreshJWT(tb.req, tokenString, 0)
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate embedded refresh token: %w", err)
 		}
@@ -331,7 +331,7 @@ func (tb *TokenBuilder) CreateJWTWithKeyPair(keyPair KeyPair) (*TokenResult, err
 	// Generate embedded refresh token if refresh config is available
 	var refreshToken string
 	if tb.tm.config.RefreshConfig != nil {
-		refreshToken, err = tb.tm.generateEmbeddedRefreshJWTWithKeyPair(tb.req, tokenString, keyPair)
+		refreshToken, err = tb.tm.generateEmbeddedRefreshJWTWithKeyPair(tb.req, tokenString, keyPair, 0)
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate embedded refresh token: %w", err)
 		}
@@ -390,7 +390,7 @@ func (tb *TokenBuilder) CreateOpaqueWithHMAC(method SigningMethod) (*TokenResult
 	// Generate embedded refresh token if refresh config is available
 	var refreshToken string
 	if tb.tm.config.RefreshConfig != nil {
-		refreshToken, err = tb.tm.generateEmbeddedRefreshOpaque(tb.req, opaqueToken)
+		refreshToken, err = tb.tm.generateEmbeddedRefreshOpaque(tb.req, opaqueToken, 0)
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate embedded refresh token: %w", err)
 		}
@@ -449,7 +449,7 @@ func (tb *TokenBuilder) CreateOpaqueWithKeyPair(keyPair KeyPair) (*TokenResult, 
 	// Generate embedded refresh token if refresh config is available
 	var refreshToken string
 	if tb.tm.config.RefreshConfig != nil {
-		refreshToken, err = tb.tm.generateEmbeddedRefreshOpaqueWithKeyPair(tb.req, opaqueToken, keyPair)
+		refreshToken, err = tb.tm.generateEmbeddedRefreshOpaqueWithKeyPair(tb.req, opaqueToken, keyPair, 0)
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate embedded refresh token: %w", err)
 		}
@@ -1427,7 +1427,7 @@ func DetectTokenType(token string) TokenType {
 // ============================================================================
 
 // generateEmbeddedRefreshJWT creates a JWT refresh token embedded with access token info
-func (tm *TokenManager) generateEmbeddedRefreshJWT(originalReq TokenRequest, accessToken string) (string, error) {
+func (tm *TokenManager) generateEmbeddedRefreshJWT(originalReq TokenRequest, accessToken string, attempts int) (string, error) {
 	if tm.config.RefreshConfig == nil {
 		return "", fmt.Errorf("refresh configuration not set")
 	}
@@ -1443,7 +1443,7 @@ func (tm *TokenManager) generateEmbeddedRefreshJWT(originalReq TokenRequest, acc
 		CustomClaims: map[string]interface{}{
 			"access_token": accessToken,
 			"token_type":   "refresh",
-			"attempts":     0,
+			"attempts":     attempts,
 		},
 	}
 
@@ -1464,7 +1464,7 @@ func (tm *TokenManager) generateEmbeddedRefreshJWT(originalReq TokenRequest, acc
 }
 
 // generateEmbeddedRefreshJWTWithKeyPair creates a JWT refresh token with key pair
-func (tm *TokenManager) generateEmbeddedRefreshJWTWithKeyPair(originalReq TokenRequest, accessToken string, keyPair KeyPair) (string, error) {
+func (tm *TokenManager) generateEmbeddedRefreshJWTWithKeyPair(originalReq TokenRequest, accessToken string, keyPair KeyPair, attempts int) (string, error) {
 	if tm.config.RefreshConfig == nil {
 		return "", fmt.Errorf("refresh configuration not set")
 	}
@@ -1480,7 +1480,7 @@ func (tm *TokenManager) generateEmbeddedRefreshJWTWithKeyPair(originalReq TokenR
 		CustomClaims: map[string]interface{}{
 			"access_token": accessToken,
 			"token_type":   "refresh",
-			"attempts":     0,
+			"attempts":     attempts,
 		},
 	}
 
@@ -1501,7 +1501,7 @@ func (tm *TokenManager) generateEmbeddedRefreshJWTWithKeyPair(originalReq TokenR
 }
 
 // generateEmbeddedRefreshOpaque creates an Opaque refresh token embedded with access token info
-func (tm *TokenManager) generateEmbeddedRefreshOpaque(originalReq TokenRequest, accessToken string) (string, error) {
+func (tm *TokenManager) generateEmbeddedRefreshOpaque(originalReq TokenRequest, accessToken string, attempts int) (string, error) {
 	if tm.config.RefreshConfig == nil {
 		return "", fmt.Errorf("refresh configuration not set")
 	}
@@ -1517,7 +1517,7 @@ func (tm *TokenManager) generateEmbeddedRefreshOpaque(originalReq TokenRequest, 
 		CustomClaims: map[string]interface{}{
 			"access_token": accessToken,
 			"token_type":   "refresh",
-			"attempts":     0,
+			"attempts":     attempts,
 		},
 	}
 
@@ -1538,7 +1538,7 @@ func (tm *TokenManager) generateEmbeddedRefreshOpaque(originalReq TokenRequest, 
 }
 
 // generateEmbeddedRefreshOpaqueWithKeyPair creates an Opaque refresh token with key pair
-func (tm *TokenManager) generateEmbeddedRefreshOpaqueWithKeyPair(originalReq TokenRequest, accessToken string, keyPair KeyPair) (string, error) {
+func (tm *TokenManager) generateEmbeddedRefreshOpaqueWithKeyPair(originalReq TokenRequest, accessToken string, keyPair KeyPair, attempts int) (string, error) {
 	if tm.config.RefreshConfig == nil {
 		return "", fmt.Errorf("refresh configuration not set")
 	}
@@ -1554,7 +1554,7 @@ func (tm *TokenManager) generateEmbeddedRefreshOpaqueWithKeyPair(originalReq Tok
 		CustomClaims: map[string]interface{}{
 			"access_token": accessToken,
 			"token_type":   "refresh",
-			"attempts":     0,
+			"attempts":     attempts,
 		},
 	}
 
@@ -1617,7 +1617,14 @@ func (tm *TokenManager) RefreshToken(refreshToken string) (*TokenResult, error) 
 		attempts = int(attemptsFloat)
 	}
 
-	if attempts >= tm.config.RefreshConfig.MaxRefreshAttempts {
+	// Check attempts limit
+	if tm.config.RefreshConfig.MaxRefreshAttempts < 0 {
+		// Negative values mean 0 attempts allowed
+		return nil, fmt.Errorf("max refresh attempts exceeded")
+	} else if tm.config.RefreshConfig.MaxRefreshAttempts == 0 {
+		// 0 means no limit
+		// Allow unlimited attempts
+	} else if attempts >= tm.config.RefreshConfig.MaxRefreshAttempts {
 		return nil, fmt.Errorf("max refresh attempts exceeded")
 	}
 
@@ -1686,6 +1693,29 @@ func (tm *TokenManager) RefreshToken(refreshToken string) (*TokenResult, error) 
 	if createErr != nil {
 		return nil, fmt.Errorf("failed to create refreshed token: %w", createErr)
 	}
+
+	// Create new refresh token with incremented attempts counter
+	var newRefreshToken string
+	if tokenType == TokenTypeJWT {
+		if tm.config.JWTKeyPair != nil {
+			newRefreshToken, createErr = tm.generateEmbeddedRefreshJWTWithKeyPair(newTokenReq, result.Token, *tm.config.JWTKeyPair, attempts+1)
+		} else {
+			newRefreshToken, createErr = tm.generateEmbeddedRefreshJWT(newTokenReq, result.Token, attempts+1)
+		}
+	} else {
+		if tm.config.OpaqueKeyPair != nil {
+			newRefreshToken, createErr = tm.generateEmbeddedRefreshOpaqueWithKeyPair(newTokenReq, result.Token, *tm.config.OpaqueKeyPair, attempts+1)
+		} else {
+			newRefreshToken, createErr = tm.generateEmbeddedRefreshOpaque(newTokenReq, result.Token, attempts+1)
+		}
+	}
+
+	if createErr != nil {
+		return nil, fmt.Errorf("failed to create new refresh token: %w", createErr)
+	}
+
+	// Update the result with the new refresh token
+	result.RefreshToken = newRefreshToken
 
 	return result, nil
 }

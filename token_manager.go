@@ -32,6 +32,15 @@ const (
 	TokenTypeOpaque TokenType = "opaque"
 )
 
+// TokenRefreshConfig holds configuration for token refresh functionality
+type TokenRefreshConfig struct {
+	RefreshThreshold   time.Duration // When to start refreshing (e.g., 1 hour before expiry)
+	MaxRefreshAttempts int           // Maximum refresh attempts
+	RefreshGracePeriod time.Duration // Grace period for refresh
+	RefreshTokenLength int           // Length of refresh token (default: 64)
+	RefreshTokenExpiry time.Duration // Refresh token expiration (default: 7 days)
+}
+
 // TokenManagerConfig holds configuration for the TokenManager
 type TokenManagerConfig struct {
 	// JWT Configuration
@@ -49,6 +58,9 @@ type TokenManagerConfig struct {
 
 	// Default token expiration
 	DefaultExpiration time.Duration
+
+	// Token refresh configuration
+	RefreshConfig *TokenRefreshConfig
 }
 
 // TokenManager manages both JWT and opaque tokens
@@ -58,10 +70,11 @@ type TokenManager struct {
 
 // TokenResult represents the result of token creation
 type TokenResult struct {
-	Token     string    `json:"token"`
-	Type      TokenType `json:"type"`
-	ExpiresAt time.Time `json:"expires_at"`
-	IssuedAt  time.Time `json:"issued_at"`
+	Token        string    `json:"token"`         // The access token
+	RefreshToken string    `json:"refresh_token"` // The refresh token
+	Type         TokenType `json:"type"`          // Token type (jwt or opaque)
+	ExpiresAt    time.Time `json:"expires_at"`    // When the access token expires
+	IssuedAt     time.Time `json:"issued_at"`     // When the token was issued
 }
 
 // KeyVersion represents a versioned key with metadata
@@ -117,6 +130,8 @@ func NewTokenManager(config *TokenManagerConfig) *TokenManager {
 	if config.OpaqueMethod == "" {
 		config.OpaqueMethod = SigningMethodHS256
 	}
+
+	// Note: Refresh config is optional - only set if explicitly provided
 
 	return &TokenManager{
 		config: config,
@@ -277,11 +292,21 @@ func (tb *TokenBuilder) CreateJWTWithHMAC(method SigningMethod) (*TokenResult, e
 		return nil, fmt.Errorf("failed to create HMAC JWT token: %w", err)
 	}
 
+	// Generate embedded refresh token if refresh config is available
+	var refreshToken string
+	if tb.tm.config.RefreshConfig != nil {
+		refreshToken, err = tb.tm.generateEmbeddedRefreshJWT(tb.req, tokenString)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate embedded refresh token: %w", err)
+		}
+	}
+
 	return &TokenResult{
-		Token:     tokenString,
-		Type:      TokenTypeJWT,
-		ExpiresAt: tb.req.ExpiresAt,
-		IssuedAt:  tb.req.IssuedAt,
+		Token:        tokenString,
+		RefreshToken: refreshToken,
+		Type:         TokenTypeJWT,
+		ExpiresAt:    tb.req.ExpiresAt,
+		IssuedAt:     tb.req.IssuedAt,
 	}, nil
 }
 
@@ -297,11 +322,21 @@ func (tb *TokenBuilder) CreateJWTWithKeyPair(keyPair KeyPair) (*TokenResult, err
 		return nil, fmt.Errorf("failed to create JWT token with key pair: %w", err)
 	}
 
+	// Generate embedded refresh token if refresh config is available
+	var refreshToken string
+	if tb.tm.config.RefreshConfig != nil {
+		refreshToken, err = tb.tm.generateEmbeddedRefreshJWTWithKeyPair(tb.req, tokenString, keyPair)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate embedded refresh token: %w", err)
+		}
+	}
+
 	return &TokenResult{
-		Token:     tokenString,
-		Type:      TokenTypeJWT,
-		ExpiresAt: tb.req.ExpiresAt,
-		IssuedAt:  tb.req.IssuedAt,
+		Token:        tokenString,
+		RefreshToken: refreshToken,
+		Type:         TokenTypeJWT,
+		ExpiresAt:    tb.req.ExpiresAt,
+		IssuedAt:     tb.req.IssuedAt,
 	}, nil
 }
 
@@ -346,11 +381,21 @@ func (tb *TokenBuilder) CreateOpaqueWithHMAC(method SigningMethod) (*TokenResult
 	// Encode to base64 for safe transmission
 	opaqueToken := base64.URLEncoding.EncodeToString(opaqueJSON)
 
+	// Generate embedded refresh token if refresh config is available
+	var refreshToken string
+	if tb.tm.config.RefreshConfig != nil {
+		refreshToken, err = tb.tm.generateEmbeddedRefreshOpaque(tb.req, opaqueToken)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate embedded refresh token: %w", err)
+		}
+	}
+
 	return &TokenResult{
-		Token:     opaqueToken,
-		Type:      TokenTypeOpaque,
-		ExpiresAt: tb.req.ExpiresAt,
-		IssuedAt:  tb.req.IssuedAt,
+		Token:        opaqueToken,
+		RefreshToken: refreshToken,
+		Type:         TokenTypeOpaque,
+		ExpiresAt:    tb.req.ExpiresAt,
+		IssuedAt:     tb.req.IssuedAt,
 	}, nil
 }
 
@@ -395,11 +440,21 @@ func (tb *TokenBuilder) CreateOpaqueWithKeyPair(keyPair KeyPair) (*TokenResult, 
 	// Encode to base64 for safe transmission
 	opaqueToken := base64.URLEncoding.EncodeToString(opaqueJSON)
 
+	// Generate embedded refresh token if refresh config is available
+	var refreshToken string
+	if tb.tm.config.RefreshConfig != nil {
+		refreshToken, err = tb.tm.generateEmbeddedRefreshOpaqueWithKeyPair(tb.req, opaqueToken, keyPair)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate embedded refresh token: %w", err)
+		}
+	}
+
 	return &TokenResult{
-		Token:     opaqueToken,
-		Type:      TokenTypeOpaque,
-		ExpiresAt: tb.req.ExpiresAt,
-		IssuedAt:  tb.req.IssuedAt,
+		Token:        opaqueToken,
+		RefreshToken: refreshToken,
+		Type:         TokenTypeOpaque,
+		ExpiresAt:    tb.req.ExpiresAt,
+		IssuedAt:     tb.req.IssuedAt,
 	}, nil
 }
 
@@ -1338,4 +1393,389 @@ func (km *KeyManager) GetKeyVersions() []*KeyVersion {
 	}
 
 	return versions
+}
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+// DetectTokenType detects the type of token (JWT or Opaque)
+func DetectTokenType(token string) TokenType {
+	// JWT tokens have 3 parts separated by dots
+	// Opaque tokens are base64 encoded JSON (no dots)
+	parts := splitToken(token, ".")
+	if len(parts) == 3 {
+		return TokenTypeJWT
+	} else if len(parts) == 1 {
+		// Try to decode as base64 - if successful, it's likely an opaque token
+		_, err := base64.URLEncoding.DecodeString(token)
+		if err == nil {
+			return TokenTypeOpaque
+		}
+	}
+	return ""
+}
+
+// ============================================================================
+// Embedded Refresh Token Methods
+// ============================================================================
+
+// generateEmbeddedRefreshJWT creates a JWT refresh token embedded with access token info
+func (tm *TokenManager) generateEmbeddedRefreshJWT(originalReq TokenRequest, accessToken string) (string, error) {
+	if tm.config.RefreshConfig == nil {
+		return "", fmt.Errorf("refresh configuration not set")
+	}
+
+	// Create refresh token with longer expiration
+	refreshReq := TokenRequest{
+		Issuer:    originalReq.Issuer,
+		Subject:   originalReq.Subject,
+		Audience:  originalReq.Audience,
+		ExpiresAt: time.Now().Add(tm.config.RefreshConfig.RefreshTokenExpiry),
+		NotBefore: time.Now(),
+		IssuedAt:  time.Now(),
+		CustomClaims: map[string]interface{}{
+			"access_token": accessToken,
+			"token_type":   "refresh",
+			"attempts":     0,
+		},
+	}
+
+	// Copy original custom claims
+	if originalReq.CustomClaims != nil {
+		for k, v := range originalReq.CustomClaims {
+			refreshReq.CustomClaims[k] = v
+		}
+	}
+
+	// Create JWT refresh token
+	refreshToken, err := CreateJwtTokenWithMethod(refreshReq, tm.config.JWTSecretKey, tm.config.JWTMethod)
+	if err != nil {
+		return "", fmt.Errorf("failed to create refresh JWT: %w", err)
+	}
+
+	return refreshToken, nil
+}
+
+// generateEmbeddedRefreshJWTWithKeyPair creates a JWT refresh token with key pair
+func (tm *TokenManager) generateEmbeddedRefreshJWTWithKeyPair(originalReq TokenRequest, accessToken string, keyPair KeyPair) (string, error) {
+	if tm.config.RefreshConfig == nil {
+		return "", fmt.Errorf("refresh configuration not set")
+	}
+
+	// Create refresh token with longer expiration
+	refreshReq := TokenRequest{
+		Issuer:    originalReq.Issuer,
+		Subject:   originalReq.Subject,
+		Audience:  originalReq.Audience,
+		ExpiresAt: time.Now().Add(tm.config.RefreshConfig.RefreshTokenExpiry),
+		NotBefore: time.Now(),
+		IssuedAt:  time.Now(),
+		CustomClaims: map[string]interface{}{
+			"access_token": accessToken,
+			"token_type":   "refresh",
+			"attempts":     0,
+		},
+	}
+
+	// Copy original custom claims
+	if originalReq.CustomClaims != nil {
+		for k, v := range originalReq.CustomClaims {
+			refreshReq.CustomClaims[k] = v
+		}
+	}
+
+	// Create JWT refresh token with key pair
+	refreshToken, err := CreateJwtTokenWithKeyPair(refreshReq, keyPair)
+	if err != nil {
+		return "", fmt.Errorf("failed to create refresh JWT with key pair: %w", err)
+	}
+
+	return refreshToken, nil
+}
+
+// generateEmbeddedRefreshOpaque creates an Opaque refresh token embedded with access token info
+func (tm *TokenManager) generateEmbeddedRefreshOpaque(originalReq TokenRequest, accessToken string) (string, error) {
+	if tm.config.RefreshConfig == nil {
+		return "", fmt.Errorf("refresh configuration not set")
+	}
+
+	// Create refresh token with longer expiration
+	refreshReq := TokenRequest{
+		Issuer:    originalReq.Issuer,
+		Subject:   originalReq.Subject,
+		Audience:  originalReq.Audience,
+		ExpiresAt: time.Now().Add(tm.config.RefreshConfig.RefreshTokenExpiry),
+		NotBefore: time.Now(),
+		IssuedAt:  time.Now(),
+		CustomClaims: map[string]interface{}{
+			"access_token": accessToken,
+			"token_type":   "refresh",
+			"attempts":     0,
+		},
+	}
+
+	// Copy original custom claims
+	if originalReq.CustomClaims != nil {
+		for k, v := range originalReq.CustomClaims {
+			refreshReq.CustomClaims[k] = v
+		}
+	}
+
+	// Create Opaque refresh token
+	refreshToken, err := tm.createOpaqueToken(refreshReq)
+	if err != nil {
+		return "", fmt.Errorf("failed to create refresh Opaque: %w", err)
+	}
+
+	return refreshToken, nil
+}
+
+// generateEmbeddedRefreshOpaqueWithKeyPair creates an Opaque refresh token with key pair
+func (tm *TokenManager) generateEmbeddedRefreshOpaqueWithKeyPair(originalReq TokenRequest, accessToken string, keyPair KeyPair) (string, error) {
+	if tm.config.RefreshConfig == nil {
+		return "", fmt.Errorf("refresh configuration not set")
+	}
+
+	// Create refresh token with longer expiration
+	refreshReq := TokenRequest{
+		Issuer:    originalReq.Issuer,
+		Subject:   originalReq.Subject,
+		Audience:  originalReq.Audience,
+		ExpiresAt: time.Now().Add(tm.config.RefreshConfig.RefreshTokenExpiry),
+		NotBefore: time.Now(),
+		IssuedAt:  time.Now(),
+		CustomClaims: map[string]interface{}{
+			"access_token": accessToken,
+			"token_type":   "refresh",
+			"attempts":     0,
+		},
+	}
+
+	// Copy original custom claims
+	if originalReq.CustomClaims != nil {
+		for k, v := range originalReq.CustomClaims {
+			refreshReq.CustomClaims[k] = v
+		}
+	}
+
+	// Create Opaque refresh token with key pair
+	refreshToken, err := tm.createOpaqueTokenWithKeyPair(refreshReq, keyPair)
+	if err != nil {
+		return "", fmt.Errorf("failed to create refresh Opaque with key pair: %w", err)
+	}
+
+	return refreshToken, nil
+}
+
+// RefreshToken refreshes an access token using an embedded refresh token
+func (tm *TokenManager) RefreshToken(refreshToken string) (*TokenResult, error) {
+	if tm.config.RefreshConfig == nil {
+		return nil, fmt.Errorf("refresh configuration not set")
+	}
+
+	// Parse the refresh token to get its claims
+	tokenType := DetectTokenType(refreshToken)
+	var refreshClaims *TokenRequest
+	var err error
+
+	switch tokenType {
+	case TokenTypeJWT:
+		if tm.config.JWTKeyPair != nil {
+			refreshClaims, err = tm.ValidateJWTWithKeyPair(refreshToken, *tm.config.JWTKeyPair)
+		} else {
+			refreshClaims, err = tm.ValidateJWTWithHMAC(refreshToken, tm.config.JWTMethod)
+		}
+	case TokenTypeOpaque:
+		if tm.config.OpaqueKeyPair != nil {
+			refreshClaims, err = tm.ValidateOpaqueWithKeyPair(refreshToken, *tm.config.OpaqueKeyPair)
+		} else {
+			refreshClaims, err = tm.ValidateOpaqueWithHMAC(refreshToken, tm.config.OpaqueMethod)
+		}
+	default:
+		return nil, fmt.Errorf("unknown refresh token type")
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse refresh token: %w", err)
+	}
+
+	// Check if it's actually a refresh token
+	if tokenType, ok := refreshClaims.CustomClaims["token_type"]; !ok || tokenType != "refresh" {
+		return nil, fmt.Errorf("invalid refresh token")
+	}
+
+	// Check attempts (JSON unmarshaling converts numbers to float64)
+	attempts := 0
+	if attemptsFloat, ok := refreshClaims.CustomClaims["attempts"].(float64); ok {
+		attempts = int(attemptsFloat)
+	}
+
+	if attempts >= tm.config.RefreshConfig.MaxRefreshAttempts {
+		return nil, fmt.Errorf("max refresh attempts exceeded")
+	}
+
+	// Get the original access token from the refresh token
+	accessToken, ok := refreshClaims.CustomClaims["access_token"].(string)
+	if !ok {
+		return nil, fmt.Errorf("invalid refresh token: missing access token")
+	}
+
+	// Parse the original access token to get its claims
+	originalClaims, err := tm.parseAccessToken(accessToken)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse original access token: %w", err)
+	}
+
+	// Create new access token with same claims but new expiration
+	now := time.Now()
+	newTokenReq := TokenRequest{
+		Issuer:       originalClaims.Issuer,
+		Subject:      originalClaims.Subject,
+		Audience:     originalClaims.Audience,
+		ExpiresAt:    now.Add(tm.config.DefaultExpiration),
+		NotBefore:    now,
+		IssuedAt:     now,
+		CustomClaims: originalClaims.CustomClaims,
+	}
+
+	// Add refreshed claim
+	if newTokenReq.CustomClaims == nil {
+		newTokenReq.CustomClaims = make(map[string]interface{})
+	}
+	newTokenReq.CustomClaims["refreshed"] = true
+
+	// Create new token using the TokenBuilder
+	tokenBuilder := tm.NewToken().
+		WithIssuer(newTokenReq.Issuer).
+		WithSubject(newTokenReq.Subject).
+		WithAudience(newTokenReq.Audience).
+		WithExpiration(newTokenReq.ExpiresAt).
+		WithNotBefore(newTokenReq.NotBefore).
+		WithIssuedAt(newTokenReq.IssuedAt)
+
+	// Add custom claims
+	for key, value := range newTokenReq.CustomClaims {
+		tokenBuilder = tokenBuilder.WithClaim(key, value)
+	}
+
+	// Use the configured method for creating the token
+	var result *TokenResult
+	var createErr error
+
+	if tokenType == TokenTypeJWT {
+		if tm.config.JWTKeyPair != nil {
+			result, createErr = tokenBuilder.CreateJWTWithKeyPair(*tm.config.JWTKeyPair)
+		} else {
+			result, createErr = tokenBuilder.CreateJWTWithHMAC(tm.config.JWTMethod)
+		}
+	} else {
+		if tm.config.OpaqueKeyPair != nil {
+			result, createErr = tokenBuilder.CreateOpaqueWithKeyPair(*tm.config.OpaqueKeyPair)
+		} else {
+			result, createErr = tokenBuilder.CreateOpaqueWithHMAC(tm.config.OpaqueMethod)
+		}
+	}
+
+	if createErr != nil {
+		return nil, fmt.Errorf("failed to create refreshed token: %w", createErr)
+	}
+
+	return result, nil
+}
+
+// parseAccessToken parses an access token and returns its claims
+func (tm *TokenManager) parseAccessToken(accessToken string) (*TokenRequest, error) {
+	tokenType := DetectTokenType(accessToken)
+
+	switch tokenType {
+	case TokenTypeJWT:
+		if tm.config.JWTKeyPair != nil {
+			return tm.ValidateJWTWithKeyPair(accessToken, *tm.config.JWTKeyPair)
+		} else {
+			return tm.ValidateJWTWithHMAC(accessToken, tm.config.JWTMethod)
+		}
+	case TokenTypeOpaque:
+		if tm.config.OpaqueKeyPair != nil {
+			return tm.ValidateOpaqueWithKeyPair(accessToken, *tm.config.OpaqueKeyPair)
+		} else {
+			return tm.ValidateOpaqueWithHMAC(accessToken, tm.config.OpaqueMethod)
+		}
+	default:
+		return nil, fmt.Errorf("unknown token type")
+	}
+}
+
+// createOpaqueToken creates an opaque token using HMAC
+func (tm *TokenManager) createOpaqueToken(req TokenRequest) (string, error) {
+	// Set issued time if not provided
+	if req.IssuedAt.IsZero() {
+		req.IssuedAt = time.Now()
+	}
+
+	// Create opaque token data
+	opaqueData := OpaqueTokenData{
+		TokenRequest: req,
+		CreatedAt:    time.Now(),
+	}
+
+	// Serialize the token request to JSON
+	jsonData, err := json.Marshal(opaqueData.TokenRequest)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal token request: %w", err)
+	}
+
+	// Create HMAC signature
+	signature, err := tm.createHMACSignatureWithMethod(jsonData, tm.config.OpaqueSecretKey, tm.config.OpaqueMethod)
+	if err != nil {
+		return "", fmt.Errorf("failed to create HMAC signature: %w", err)
+	}
+
+	opaqueData.Signature = signature
+
+	// Serialize the complete opaque data
+	opaqueJSON, err := json.Marshal(opaqueData)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal opaque token data: %w", err)
+	}
+
+	// Encode to base64 for safe transmission
+	return base64.URLEncoding.EncodeToString(opaqueJSON), nil
+}
+
+// createOpaqueTokenWithKeyPair creates an opaque token using a key pair
+func (tm *TokenManager) createOpaqueTokenWithKeyPair(req TokenRequest, keyPair KeyPair) (string, error) {
+	// Set issued time if not provided
+	if req.IssuedAt.IsZero() {
+		req.IssuedAt = time.Now()
+	}
+
+	// Create opaque token data
+	opaqueData := OpaqueTokenData{
+		TokenRequest: req,
+		CreatedAt:    time.Now(),
+	}
+
+	// Serialize the token request to JSON
+	jsonData, err := json.Marshal(opaqueData.TokenRequest)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal token request: %w", err)
+	}
+
+	// Create key pair signature
+	signature, err := tm.createKeyPairSignature(jsonData, keyPair)
+	if err != nil {
+		return "", fmt.Errorf("failed to create key pair signature: %w", err)
+	}
+
+	opaqueData.Signature = signature
+
+	// Serialize the complete opaque data
+	opaqueJSON, err := json.Marshal(opaqueData)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal opaque token data: %w", err)
+	}
+
+	// Encode to base64 for safe transmission
+	return base64.URLEncoding.EncodeToString(opaqueJSON), nil
 }

@@ -2,6 +2,8 @@ package tokeno
 
 import (
 	"crypto"
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/hmac"
@@ -51,6 +53,10 @@ type TokenManagerConfig struct {
 	OpaqueSecretKey   []byte
 	OpaqueMethod      SigningMethod
 	OpaqueTokenLength int
+
+	// Opaque Token Encryption Configuration
+	OpaqueEncryptionKey []byte // Key for encrypting opaque tokens
+	OpaqueUseEncryption bool   // Whether to encrypt opaque tokens instead of base64 encoding
 
 	// Key Pairs for asymmetric tokens (optional)
 	JWTKeyPair    *KeyPair // For JWT tokens
@@ -200,6 +206,13 @@ func (b *TokenManagerBuilder) WithOpaqueTokenLength(length int) *TokenManagerBui
 // WithRefreshConfig sets the token refresh configuration
 func (b *TokenManagerBuilder) WithRefreshConfig(config *TokenRefreshConfig) *TokenManagerBuilder {
 	b.config.RefreshConfig = config
+	return b
+}
+
+// WithOpaqueEncryption sets the opaque token encryption configuration
+func (b *TokenManagerBuilder) WithOpaqueEncryption(encryptionKey []byte, useEncryption bool) *TokenManagerBuilder {
+	b.config.OpaqueEncryptionKey = encryptionKey
+	b.config.OpaqueUseEncryption = useEncryption
 	return b
 }
 
@@ -384,8 +397,17 @@ func (tb *TokenBuilder) CreateOpaqueWithHMAC(method SigningMethod) (*TokenResult
 		return nil, fmt.Errorf("failed to marshal opaque token data: %w", err)
 	}
 
-	// Encode to base64 for safe transmission
-	opaqueToken := base64.URLEncoding.EncodeToString(opaqueJSON)
+	// Encrypt or encode the token data
+	var opaqueToken string
+	if tb.tm.config.OpaqueUseEncryption {
+		opaqueToken, err = tb.tm.encryptOpaqueToken(opaqueJSON)
+		if err != nil {
+			return nil, fmt.Errorf("failed to encrypt opaque token: %w", err)
+		}
+	} else {
+		// Encode to base64 for safe transmission
+		opaqueToken = base64.URLEncoding.EncodeToString(opaqueJSON)
+	}
 
 	// Generate embedded refresh token if refresh config is available
 	var refreshToken string
@@ -443,8 +465,17 @@ func (tb *TokenBuilder) CreateOpaqueWithKeyPair(keyPair KeyPair) (*TokenResult, 
 		return nil, fmt.Errorf("failed to marshal opaque token data: %w", err)
 	}
 
-	// Encode to base64 for safe transmission
-	opaqueToken := base64.URLEncoding.EncodeToString(opaqueJSON)
+	// Encrypt or encode the token data
+	var opaqueToken string
+	if tb.tm.config.OpaqueUseEncryption {
+		opaqueToken, err = tb.tm.encryptOpaqueToken(opaqueJSON)
+		if err != nil {
+			return nil, fmt.Errorf("failed to encrypt opaque token: %w", err)
+		}
+	} else {
+		// Encode to base64 for safe transmission
+		opaqueToken = base64.URLEncoding.EncodeToString(opaqueJSON)
+	}
 
 	// Generate embedded refresh token if refresh config is available
 	var refreshToken string
@@ -532,8 +563,17 @@ func (tm *TokenManager) CreateOpaqueToken(req TokenRequest) (*TokenResult, error
 		return nil, fmt.Errorf("failed to marshal opaque token data: %w", err)
 	}
 
-	// Encode to base64 for safe transmission
-	opaqueToken := base64.URLEncoding.EncodeToString(opaqueJSON)
+	// Encrypt or encode the token data
+	var opaqueToken string
+	if tm.config.OpaqueUseEncryption {
+		opaqueToken, err = tm.encryptOpaqueToken(opaqueJSON)
+		if err != nil {
+			return nil, fmt.Errorf("failed to encrypt opaque token: %w", err)
+		}
+	} else {
+		// Encode to base64 for safe transmission
+		opaqueToken = base64.URLEncoding.EncodeToString(opaqueJSON)
+	}
 
 	return &TokenResult{
 		Token:     opaqueToken,
@@ -638,10 +678,20 @@ func (tm *TokenManager) ValidateJWTWithKeyPair(token string, keyPair KeyPair) (*
 
 // ValidateOpaqueWithHMAC validates an opaque token using HMAC
 func (tm *TokenManager) ValidateOpaqueWithHMAC(token string, method SigningMethod) (*TokenRequest, error) {
-	// Decode base64
-	opaqueJSON, err := base64.URLEncoding.DecodeString(token)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode opaque token: %w", err)
+	// Decrypt or decode the token data
+	var opaqueJSON []byte
+	var err error
+	if tm.config.OpaqueUseEncryption {
+		opaqueJSON, err = tm.decryptOpaqueToken(token)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decrypt opaque token: %w", err)
+		}
+	} else {
+		// Decode base64
+		opaqueJSON, err = base64.URLEncoding.DecodeString(token)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode opaque token: %w", err)
+		}
 	}
 
 	// Unmarshal opaque token data
@@ -670,10 +720,20 @@ func (tm *TokenManager) ValidateOpaqueWithHMAC(token string, method SigningMetho
 
 // ValidateOpaqueWithKeyPair validates an opaque token using a specific key pair
 func (tm *TokenManager) ValidateOpaqueWithKeyPair(token string, keyPair KeyPair) (*TokenRequest, error) {
-	// Decode base64
-	opaqueJSON, err := base64.URLEncoding.DecodeString(token)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode opaque token: %w", err)
+	// Decrypt or decode the token data
+	var opaqueJSON []byte
+	var err error
+	if tm.config.OpaqueUseEncryption {
+		opaqueJSON, err = tm.decryptOpaqueToken(token)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decrypt opaque token: %w", err)
+		}
+	} else {
+		// Decode base64
+		opaqueJSON, err = base64.URLEncoding.DecodeString(token)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode opaque token: %w", err)
+		}
 	}
 
 	// Unmarshal opaque token data
@@ -776,10 +836,20 @@ func (tm *TokenManager) validateJWTToken(token string) (*TokenRequest, error) {
 
 // validateOpaqueToken validates an opaque token and returns the TokenRequest
 func (tm *TokenManager) validateOpaqueToken(token string) (*TokenRequest, error) {
-	// Decode base64
-	opaqueJSON, err := base64.URLEncoding.DecodeString(token)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode opaque token: %w", err)
+	// Decrypt or decode the token data
+	var opaqueJSON []byte
+	var err error
+	if tm.config.OpaqueUseEncryption {
+		opaqueJSON, err = tm.decryptOpaqueToken(token)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decrypt opaque token: %w", err)
+		}
+	} else {
+		// Decode base64
+		opaqueJSON, err = base64.URLEncoding.DecodeString(token)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode opaque token: %w", err)
+		}
 	}
 
 	// Unmarshal opaque token data
@@ -1402,6 +1472,83 @@ func (km *KeyManager) GetKeyVersions() []*KeyVersion {
 }
 
 // ============================================================================
+// Encryption/Decryption Methods for Opaque Tokens
+// ============================================================================
+
+// encryptOpaqueToken encrypts opaque token data using AES-GCM
+func (tm *TokenManager) encryptOpaqueToken(data []byte) (string, error) {
+	if len(tm.config.OpaqueEncryptionKey) == 0 {
+		return "", fmt.Errorf("encryption key not configured")
+	}
+
+	// Create a new AES cipher block
+	block, err := aes.NewCipher(tm.config.OpaqueEncryptionKey)
+	if err != nil {
+		return "", fmt.Errorf("failed to create cipher: %w", err)
+	}
+
+	// Create GCM mode
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", fmt.Errorf("failed to create GCM: %w", err)
+	}
+
+	// Generate a random nonce
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		return "", fmt.Errorf("failed to generate nonce: %w", err)
+	}
+
+	// Encrypt the data
+	ciphertext := gcm.Seal(nonce, nonce, data, nil)
+
+	// Encode to base64 for safe transmission
+	return base64.URLEncoding.EncodeToString(ciphertext), nil
+}
+
+// decryptOpaqueToken decrypts opaque token data using AES-GCM
+func (tm *TokenManager) decryptOpaqueToken(encryptedData string) ([]byte, error) {
+	if len(tm.config.OpaqueEncryptionKey) == 0 {
+		return nil, fmt.Errorf("encryption key not configured")
+	}
+
+	// Decode from base64
+	ciphertext, err := base64.URLEncoding.DecodeString(encryptedData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode base64: %w", err)
+	}
+
+	// Create a new AES cipher block
+	block, err := aes.NewCipher(tm.config.OpaqueEncryptionKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create cipher: %w", err)
+	}
+
+	// Create GCM mode
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create GCM: %w", err)
+	}
+
+	// Check if ciphertext is long enough to contain nonce
+	if len(ciphertext) < gcm.NonceSize() {
+		return nil, fmt.Errorf("ciphertext too short")
+	}
+
+	// Extract nonce and ciphertext
+	nonce := ciphertext[:gcm.NonceSize()]
+	ciphertext = ciphertext[gcm.NonceSize():]
+
+	// Decrypt the data
+	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decrypt: %w", err)
+	}
+
+	return plaintext, nil
+}
+
+// ============================================================================
 // Helper Functions
 // ============================================================================
 
@@ -1775,8 +1922,13 @@ func (tm *TokenManager) createOpaqueToken(req TokenRequest) (string, error) {
 		return "", fmt.Errorf("failed to marshal opaque token data: %w", err)
 	}
 
-	// Encode to base64 for safe transmission
-	return base64.URLEncoding.EncodeToString(opaqueJSON), nil
+	// Encrypt or encode the token data
+	if tm.config.OpaqueUseEncryption {
+		return tm.encryptOpaqueToken(opaqueJSON)
+	} else {
+		// Encode to base64 for safe transmission
+		return base64.URLEncoding.EncodeToString(opaqueJSON), nil
+	}
 }
 
 // createOpaqueTokenWithKeyPair creates an opaque token using a key pair
@@ -1812,6 +1964,11 @@ func (tm *TokenManager) createOpaqueTokenWithKeyPair(req TokenRequest, keyPair K
 		return "", fmt.Errorf("failed to marshal opaque token data: %w", err)
 	}
 
-	// Encode to base64 for safe transmission
-	return base64.URLEncoding.EncodeToString(opaqueJSON), nil
+	// Encrypt or encode the token data
+	if tm.config.OpaqueUseEncryption {
+		return tm.encryptOpaqueToken(opaqueJSON)
+	} else {
+		// Encode to base64 for safe transmission
+		return base64.URLEncoding.EncodeToString(opaqueJSON), nil
+	}
 }

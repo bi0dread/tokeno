@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/pem"
 	"fmt"
 	"time"
@@ -52,20 +53,28 @@ type TokenRequest struct {
 	ExpiresAt    time.Time              `json:"expires_at"`
 	NotBefore    time.Time              `json:"not_before"`
 	IssuedAt     time.Time              `json:"issued_at"`
+	SessionID    string                 `json:"session_id"`
 	CustomClaims map[string]interface{} `json:"custom_claims"`
 }
 
 // CreateJwtToken creates a JWT token from the provided TokenRequest
 func CreateJwtToken(req TokenRequest, secretKey []byte) (string, error) {
 	// Create a new token with the signing method
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+	claims := jwt.MapClaims{
 		"iss": req.Issuer,           // Issuer
 		"sub": req.Subject,          // Subject
 		"aud": req.Audience,         // Audience
 		"exp": req.ExpiresAt.Unix(), // Expiration time
 		"nbf": req.NotBefore.Unix(), // Not before
 		"iat": req.IssuedAt.Unix(),  // Issued at
-	})
+	}
+
+	// Add session_id if provided
+	if req.SessionID != "" {
+		claims["session_id"] = req.SessionID
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 
 	// Add custom claims if provided
 	for key, value := range req.CustomClaims {
@@ -150,14 +159,21 @@ func CreateJwtTokenWithMethod(req TokenRequest, key interface{}, method SigningM
 	}
 
 	// Create a new token with the specified signing method
-	token := jwt.NewWithClaims(signingMethod, jwt.MapClaims{
+	claims := jwt.MapClaims{
 		"iss": req.Issuer,           // Issuer
 		"sub": req.Subject,          // Subject
 		"aud": req.Audience,         // Audience
 		"exp": req.ExpiresAt.Unix(), // Expiration time
 		"nbf": req.NotBefore.Unix(), // Not before
 		"iat": req.IssuedAt.Unix(),  // Issued at
-	})
+	}
+
+	// Add session_id if provided
+	if req.SessionID != "" {
+		claims["session_id"] = req.SessionID
+	}
+
+	token := jwt.NewWithClaims(signingMethod, claims)
 
 	// Add custom claims if provided
 	for key, value := range req.CustomClaims {
@@ -430,4 +446,16 @@ func LoadEdDSAKeyPairFromPEM(privateKeyPEM, publicKeyPEM []byte) (*KeyPair, erro
 		PublicKey:  ed25519PublicKey,
 		Method:     SigningMethodEdDSA,
 	}, nil
+}
+
+// GenerateSessionID generates a unique session ID
+// This is a public function that can be used to generate session IDs
+// outside of the token creation process
+func GenerateSessionID() string {
+	bytes := make([]byte, 16) // 128 bits
+	if _, err := rand.Read(bytes); err != nil {
+		// Fallback to timestamp-based ID if random generation fails
+		return fmt.Sprintf("session_%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(bytes)
 }

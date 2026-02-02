@@ -54,6 +54,7 @@ type TokenRequest struct {
 	NotBefore    time.Time              `json:"not_before"`
 	IssuedAt     time.Time              `json:"issued_at"`
 	SessionID    string                 `json:"session_id"`
+	ProviderID   string                 `json:"provider_id"`
 	CustomClaims map[string]interface{} `json:"custom_claims"`
 }
 
@@ -72,6 +73,11 @@ func CreateJwtToken(req TokenRequest, secretKey []byte) (string, error) {
 	// Add session_id if provided
 	if req.SessionID != "" {
 		claims["session_id"] = req.SessionID
+	}
+
+	// Add provider_id if provided
+	if req.ProviderID != "" {
+		claims["provider_id"] = req.ProviderID
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -171,6 +177,11 @@ func CreateJwtTokenWithMethod(req TokenRequest, key interface{}, method SigningM
 	// Add session_id if provided
 	if req.SessionID != "" {
 		claims["session_id"] = req.SessionID
+	}
+
+	// Add provider_id if provided
+	if req.ProviderID != "" {
+		claims["provider_id"] = req.ProviderID
 	}
 
 	token := jwt.NewWithClaims(signingMethod, claims)

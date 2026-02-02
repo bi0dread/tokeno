@@ -285,6 +285,12 @@ func (tb *TokenBuilder) WithSessionID(sessionID string) *TokenBuilder {
 	return tb
 }
 
+// WithProviderID sets the provider ID for the token
+func (tb *TokenBuilder) WithProviderID(providerID string) *TokenBuilder {
+	tb.req.ProviderID = providerID
+	return tb
+}
+
 // WithClaim adds a custom claim to the token
 func (tb *TokenBuilder) WithClaim(key string, value interface{}) *TokenBuilder {
 	if tb.req.CustomClaims == nil {
@@ -328,6 +334,18 @@ func (tb *TokenBuilder) CreateJWTWithHMAC(method SigningMethod) (*TokenResult, e
 
 	// Remove session_id from custom claims since it's now in the SessionID field
 	delete(tb.req.CustomClaims, "session_id")
+
+	// Extract provider_id from custom claims if provided
+	if tb.req.ProviderID == "" {
+		if providerIDClaim, exists := tb.req.CustomClaims["provider_id"]; exists {
+			if providerIDStr, ok := providerIDClaim.(string); ok && providerIDStr != "" {
+				tb.req.ProviderID = providerIDStr
+			}
+		}
+	}
+
+	// Remove provider_id from custom claims since it's now in the ProviderID field
+	delete(tb.req.CustomClaims, "provider_id")
 
 	tokenString, err := CreateJwtTokenWithMethod(tb.req, tb.tm.config.JWTSecretKey, method)
 	if err != nil {
@@ -375,6 +393,18 @@ func (tb *TokenBuilder) CreateJWTWithKeyPair(keyPair KeyPair) (*TokenResult, err
 
 	// Remove session_id from custom claims since it's now in the SessionID field
 	delete(tb.req.CustomClaims, "session_id")
+
+	// Extract provider_id from custom claims if provided
+	if tb.req.ProviderID == "" {
+		if providerIDClaim, exists := tb.req.CustomClaims["provider_id"]; exists {
+			if providerIDStr, ok := providerIDClaim.(string); ok && providerIDStr != "" {
+				tb.req.ProviderID = providerIDStr
+			}
+		}
+	}
+
+	// Remove provider_id from custom claims since it's now in the ProviderID field
+	delete(tb.req.CustomClaims, "provider_id")
 
 	tokenString, err := CreateJwtTokenWithKeyPair(tb.req, keyPair)
 	if err != nil {
@@ -427,6 +457,18 @@ func (tb *TokenBuilder) CreateOpaqueWithHMAC(method SigningMethod) (*TokenResult
 
 	// Remove session_id from custom claims since it's now in the SessionID field
 	delete(tb.req.CustomClaims, "session_id")
+
+	// Extract provider_id from custom claims if provided
+	if tb.req.ProviderID == "" {
+		if providerIDClaim, exists := tb.req.CustomClaims["provider_id"]; exists {
+			if providerIDStr, ok := providerIDClaim.(string); ok && providerIDStr != "" {
+				tb.req.ProviderID = providerIDStr
+			}
+		}
+	}
+
+	// Remove provider_id from custom claims since it's now in the ProviderID field
+	delete(tb.req.CustomClaims, "provider_id")
 
 	// Create opaque token data
 	opaqueData := OpaqueTokenData{
@@ -512,6 +554,18 @@ func (tb *TokenBuilder) CreateOpaqueWithKeyPair(keyPair KeyPair) (*TokenResult, 
 
 	// Remove session_id from custom claims since it's now in the SessionID field
 	delete(tb.req.CustomClaims, "session_id")
+
+	// Extract provider_id from custom claims if provided
+	if tb.req.ProviderID == "" {
+		if providerIDClaim, exists := tb.req.CustomClaims["provider_id"]; exists {
+			if providerIDStr, ok := providerIDClaim.(string); ok && providerIDStr != "" {
+				tb.req.ProviderID = providerIDStr
+			}
+		}
+	}
+
+	// Remove provider_id from custom claims since it's now in the ProviderID field
+	delete(tb.req.CustomClaims, "provider_id")
 
 	// Create opaque token data
 	opaqueData := OpaqueTokenData{
@@ -695,12 +749,14 @@ func (tm *TokenManager) ValidateJWTWithHMAC(token string, method SigningMethod) 
 		NotBefore:    getTimeClaim(claims, "nbf"),
 		IssuedAt:     getTimeClaim(claims, "iat"),
 		SessionID:    getStringClaim(claims, "session_id"),
+		ProviderID:   getStringClaim(claims, "provider_id"),
 		CustomClaims: make(map[string]interface{}),
 	}
 
 	// Add custom claims (exclude standard claims)
 	standardClaims := map[string]bool{
 		"iss": true, "sub": true, "aud": true, "exp": true, "nbf": true, "iat": true,
+		"session_id": true, "provider_id": true,
 	}
 
 	for key, value := range claims {
@@ -735,12 +791,14 @@ func (tm *TokenManager) ValidateJWTWithKeyPair(token string, keyPair KeyPair) (*
 		NotBefore:    getTimeClaim(claims, "nbf"),
 		IssuedAt:     getTimeClaim(claims, "iat"),
 		SessionID:    getStringClaim(claims, "session_id"),
+		ProviderID:   getStringClaim(claims, "provider_id"),
 		CustomClaims: make(map[string]interface{}),
 	}
 
 	// Add custom claims (exclude standard claims)
 	standardClaims := map[string]bool{
 		"iss": true, "sub": true, "aud": true, "exp": true, "nbf": true, "iat": true,
+		"session_id": true, "provider_id": true,
 	}
 
 	for key, value := range claims {
@@ -894,12 +952,14 @@ func (tm *TokenManager) validateJWTToken(token string) (*TokenRequest, error) {
 		NotBefore:    getTimeClaim(claims, "nbf"),
 		IssuedAt:     getTimeClaim(claims, "iat"),
 		SessionID:    getStringClaim(claims, "session_id"),
+		ProviderID:   getStringClaim(claims, "provider_id"),
 		CustomClaims: make(map[string]interface{}),
 	}
 
 	// Add custom claims (exclude standard claims)
 	standardClaims := map[string]bool{
 		"iss": true, "sub": true, "aud": true, "exp": true, "nbf": true, "iat": true,
+		"session_id": true, "provider_id": true,
 	}
 
 	for key, value := range claims {
@@ -1663,13 +1723,14 @@ func (tm *TokenManager) generateEmbeddedRefreshJWT(originalReq TokenRequest, acc
 
 	// Create refresh token with longer expiration
 	refreshReq := TokenRequest{
-		Issuer:    originalReq.Issuer,
-		Subject:   originalReq.Subject,
-		Audience:  originalReq.Audience,
-		ExpiresAt: time.Now().Add(tm.config.RefreshConfig.RefreshTokenExpiry),
-		NotBefore: time.Now(),
-		IssuedAt:  time.Now(),
-		SessionID: originalReq.SessionID, // Preserve session_id from original token
+		Issuer:     originalReq.Issuer,
+		Subject:    originalReq.Subject,
+		Audience:   originalReq.Audience,
+		ExpiresAt:  time.Now().Add(tm.config.RefreshConfig.RefreshTokenExpiry),
+		NotBefore:  time.Now(),
+		IssuedAt:   time.Now(),
+		SessionID:  originalReq.SessionID,  // Preserve session_id from original token
+		ProviderID: originalReq.ProviderID, // Preserve provider_id from original token
 		CustomClaims: map[string]interface{}{
 			"access_token": accessToken,
 			"token_type":   "refresh",
@@ -1701,13 +1762,14 @@ func (tm *TokenManager) generateEmbeddedRefreshJWTWithKeyPair(originalReq TokenR
 
 	// Create refresh token with longer expiration
 	refreshReq := TokenRequest{
-		Issuer:    originalReq.Issuer,
-		Subject:   originalReq.Subject,
-		Audience:  originalReq.Audience,
-		ExpiresAt: time.Now().Add(tm.config.RefreshConfig.RefreshTokenExpiry),
-		NotBefore: time.Now(),
-		IssuedAt:  time.Now(),
-		SessionID: originalReq.SessionID, // Preserve session_id from original token
+		Issuer:     originalReq.Issuer,
+		Subject:    originalReq.Subject,
+		Audience:   originalReq.Audience,
+		ExpiresAt:  time.Now().Add(tm.config.RefreshConfig.RefreshTokenExpiry),
+		NotBefore:  time.Now(),
+		IssuedAt:   time.Now(),
+		SessionID:  originalReq.SessionID,  // Preserve session_id from original token
+		ProviderID: originalReq.ProviderID, // Preserve provider_id from original token
 		CustomClaims: map[string]interface{}{
 			"access_token": accessToken,
 			"token_type":   "refresh",
@@ -1739,13 +1801,14 @@ func (tm *TokenManager) generateEmbeddedRefreshOpaque(originalReq TokenRequest, 
 
 	// Create refresh token with longer expiration
 	refreshReq := TokenRequest{
-		Issuer:    originalReq.Issuer,
-		Subject:   originalReq.Subject,
-		Audience:  originalReq.Audience,
-		ExpiresAt: time.Now().Add(tm.config.RefreshConfig.RefreshTokenExpiry),
-		NotBefore: time.Now(),
-		IssuedAt:  time.Now(),
-		SessionID: originalReq.SessionID, // Preserve session_id from original token
+		Issuer:     originalReq.Issuer,
+		Subject:    originalReq.Subject,
+		Audience:   originalReq.Audience,
+		ExpiresAt:  time.Now().Add(tm.config.RefreshConfig.RefreshTokenExpiry),
+		NotBefore:  time.Now(),
+		IssuedAt:   time.Now(),
+		SessionID:  originalReq.SessionID,  // Preserve session_id from original token
+		ProviderID: originalReq.ProviderID, // Preserve provider_id from original token
 		CustomClaims: map[string]interface{}{
 			"access_token": accessToken,
 			"token_type":   "refresh",
@@ -1777,13 +1840,14 @@ func (tm *TokenManager) generateEmbeddedRefreshOpaqueWithKeyPair(originalReq Tok
 
 	// Create refresh token with longer expiration
 	refreshReq := TokenRequest{
-		Issuer:    originalReq.Issuer,
-		Subject:   originalReq.Subject,
-		Audience:  originalReq.Audience,
-		ExpiresAt: time.Now().Add(tm.config.RefreshConfig.RefreshTokenExpiry),
-		NotBefore: time.Now(),
-		IssuedAt:  time.Now(),
-		SessionID: originalReq.SessionID, // Preserve session_id from original token
+		Issuer:     originalReq.Issuer,
+		Subject:    originalReq.Subject,
+		Audience:   originalReq.Audience,
+		ExpiresAt:  time.Now().Add(tm.config.RefreshConfig.RefreshTokenExpiry),
+		NotBefore:  time.Now(),
+		IssuedAt:   time.Now(),
+		SessionID:  originalReq.SessionID,  // Preserve session_id from original token
+		ProviderID: originalReq.ProviderID, // Preserve provider_id from original token
 		CustomClaims: map[string]interface{}{
 			"access_token": accessToken,
 			"token_type":   "refresh",
@@ -1882,7 +1946,8 @@ func (tm *TokenManager) RefreshToken(refreshToken string) (*TokenResult, error) 
 		ExpiresAt:    now.Add(tm.config.DefaultExpiration),
 		NotBefore:    now,
 		IssuedAt:     now,
-		SessionID:    originalClaims.SessionID, // Preserve session_id from original token
+		SessionID:    originalClaims.SessionID,  // Preserve session_id from original token
+		ProviderID:   originalClaims.ProviderID, // Preserve provider_id from original token
 		CustomClaims: originalClaims.CustomClaims,
 	}
 

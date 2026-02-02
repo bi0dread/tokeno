@@ -2,8 +2,6 @@ package tokeno
 
 import (
 	"crypto"
-	"crypto/aes"
-	"crypto/cipher"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/hmac"
@@ -30,8 +28,7 @@ import (
 type TokenType string
 
 const (
-	TokenTypeJWT    TokenType = "jwt"
-	TokenTypeOpaque TokenType = "opaque"
+	TokenTypeJWT TokenType = "jwt"
 )
 
 // TokenRefreshConfig holds configuration for token refresh functionality
@@ -49,18 +46,8 @@ type TokenManagerConfig struct {
 	JWTSecretKey []byte
 	JWTMethod    SigningMethod
 
-	// Opaque Token Configuration
-	OpaqueSecretKey   []byte
-	OpaqueMethod      SigningMethod
-	OpaqueTokenLength int
-
-	// Opaque Token Encryption Configuration
-	OpaqueEncryptionKey []byte // Key for encrypting opaque tokens
-	OpaqueUseEncryption bool   // Whether to encrypt opaque tokens instead of base64 encoding
-
 	// Key Pairs for asymmetric tokens (optional)
-	JWTKeyPair    *KeyPair // For JWT tokens
-	OpaqueKeyPair *KeyPair // For opaque tokens
+	JWTKeyPair *KeyPair // For JWT tokens
 
 	// Default token expiration
 	DefaultExpiration time.Duration
@@ -69,7 +56,7 @@ type TokenManagerConfig struct {
 	RefreshConfig *TokenRefreshConfig
 }
 
-// TokenManager manages both JWT and opaque tokens
+// TokenManager manages JWT tokens
 type TokenManager struct {
 	config *TokenManagerConfig
 }
@@ -78,7 +65,7 @@ type TokenManager struct {
 type TokenResult struct {
 	Token        string    `json:"token"`         // The access token
 	RefreshToken string    `json:"refresh_token"` // The refresh token
-	Type         TokenType `json:"type"`          // Token type (jwt or opaque)
+	Type         TokenType `json:"type"`          // Token type (jwt)
 	ExpiresAt    time.Time `json:"expires_at"`    // When the access token expires
 	IssuedAt     time.Time `json:"issued_at"`     // When the token was issued
 }
@@ -114,27 +101,14 @@ type KeyManager struct {
 	cleanupTicker *time.Ticker
 }
 
-// OpaqueTokenData represents the data stored in an opaque token
-type OpaqueTokenData struct {
-	TokenRequest TokenRequest `json:"token_request"`
-	Signature    string       `json:"signature"`
-	CreatedAt    time.Time    `json:"created_at"`
-}
-
 // NewTokenManager creates a new TokenManager with the given configuration
 func NewTokenManager(config *TokenManagerConfig) *TokenManager {
 	// Set defaults
-	if config.OpaqueTokenLength == 0 {
-		config.OpaqueTokenLength = 32
-	}
 	if config.DefaultExpiration == 0 {
 		config.DefaultExpiration = 24 * time.Hour
 	}
 	if config.JWTMethod == "" {
 		config.JWTMethod = SigningMethodHS256
-	}
-	if config.OpaqueMethod == "" {
-		config.OpaqueMethod = SigningMethodHS256
 	}
 
 	// Note: Refresh config is optional - only set if explicitly provided
@@ -154,9 +128,7 @@ func NewTokenManagerBuilder() *TokenManagerBuilder {
 	return &TokenManagerBuilder{
 		config: &TokenManagerConfig{
 			DefaultExpiration: 24 * time.Hour,
-			OpaqueTokenLength: 32,
 			JWTMethod:         SigningMethodHS256,
-			OpaqueMethod:      SigningMethodHS256,
 		},
 	}
 }
@@ -164,12 +136,6 @@ func NewTokenManagerBuilder() *TokenManagerBuilder {
 // WithJWTSecret sets the JWT secret key
 func (b *TokenManagerBuilder) WithJWTSecret(secret []byte) *TokenManagerBuilder {
 	b.config.JWTSecretKey = secret
-	return b
-}
-
-// WithOpaqueSecret sets the opaque token secret key
-func (b *TokenManagerBuilder) WithOpaqueSecret(secret []byte) *TokenManagerBuilder {
-	b.config.OpaqueSecretKey = secret
 	return b
 }
 
@@ -185,34 +151,15 @@ func (b *TokenManagerBuilder) WithJWTKeyPair(keyPair *KeyPair) *TokenManagerBuil
 	return b
 }
 
-// WithOpaqueKeyPair sets the opaque token key pair
-func (b *TokenManagerBuilder) WithOpaqueKeyPair(keyPair *KeyPair) *TokenManagerBuilder {
-	b.config.OpaqueKeyPair = keyPair
-	return b
-}
-
 // WithDefaultExpiration sets the default token expiration
 func (b *TokenManagerBuilder) WithDefaultExpiration(duration time.Duration) *TokenManagerBuilder {
 	b.config.DefaultExpiration = duration
 	return b
 }
 
-// WithOpaqueTokenLength sets the opaque token signature length
-func (b *TokenManagerBuilder) WithOpaqueTokenLength(length int) *TokenManagerBuilder {
-	b.config.OpaqueTokenLength = length
-	return b
-}
-
 // WithRefreshConfig sets the token refresh configuration
 func (b *TokenManagerBuilder) WithRefreshConfig(config *TokenRefreshConfig) *TokenManagerBuilder {
 	b.config.RefreshConfig = config
-	return b
-}
-
-// WithOpaqueEncryption sets the opaque token encryption configuration
-func (b *TokenManagerBuilder) WithOpaqueEncryption(encryptionKey []byte, useEncryption bool) *TokenManagerBuilder {
-	b.config.OpaqueEncryptionKey = encryptionKey
-	b.config.OpaqueUseEncryption = useEncryption
 	return b
 }
 
@@ -429,200 +376,6 @@ func (tb *TokenBuilder) CreateJWTWithKeyPair(keyPair KeyPair) (*TokenResult, err
 	}, nil
 }
 
-// CreateOpaqueWithHMAC creates an opaque token using HMAC
-func (tb *TokenBuilder) CreateOpaqueWithHMAC(method SigningMethod) (*TokenResult, error) {
-	// Set default expiration if not provided
-	if tb.req.ExpiresAt.IsZero() {
-		tb.req.ExpiresAt = time.Now().Add(tb.tm.config.DefaultExpiration)
-	}
-
-	// Set issued time if not provided
-	if tb.req.IssuedAt.IsZero() {
-		tb.req.IssuedAt = time.Now()
-	}
-
-	// Generate session_id if not provided in SessionID field or custom claims
-	if tb.req.SessionID == "" {
-		// Check if session_id is provided in custom claims
-		if sessionIDClaim, exists := tb.req.CustomClaims["session_id"]; exists {
-			if sessionIDStr, ok := sessionIDClaim.(string); ok && sessionIDStr != "" {
-				tb.req.SessionID = sessionIDStr
-			} else {
-				tb.req.SessionID = generateSessionID()
-			}
-		} else {
-			tb.req.SessionID = generateSessionID()
-		}
-	}
-
-	// Remove session_id from custom claims since it's now in the SessionID field
-	delete(tb.req.CustomClaims, "session_id")
-
-	// Extract provider_id from custom claims if provided
-	if tb.req.ProviderID == "" {
-		if providerIDClaim, exists := tb.req.CustomClaims["provider_id"]; exists {
-			if providerIDStr, ok := providerIDClaim.(string); ok && providerIDStr != "" {
-				tb.req.ProviderID = providerIDStr
-			}
-		}
-	}
-
-	// Remove provider_id from custom claims since it's now in the ProviderID field
-	delete(tb.req.CustomClaims, "provider_id")
-
-	// Create opaque token data
-	opaqueData := OpaqueTokenData{
-		TokenRequest: tb.req,
-		CreatedAt:    time.Now(),
-	}
-
-	// Serialize the token request to JSON
-	jsonData, err := json.Marshal(opaqueData.TokenRequest)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal token request: %w", err)
-	}
-
-	// Create HMAC signature with specified method
-	signature, err := tb.tm.createHMACSignatureWithMethod(jsonData, tb.tm.config.OpaqueSecretKey, method)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create HMAC signature: %w", err)
-	}
-
-	opaqueData.Signature = signature
-
-	// Serialize the complete opaque data
-	opaqueJSON, err := json.Marshal(opaqueData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal opaque token data: %w", err)
-	}
-
-	// Encrypt or encode the token data
-	var opaqueToken string
-	if tb.tm.config.OpaqueUseEncryption {
-		opaqueToken, err = tb.tm.encryptOpaqueToken(opaqueJSON)
-		if err != nil {
-			return nil, fmt.Errorf("failed to encrypt opaque token: %w", err)
-		}
-	} else {
-		// Encode to base64 for safe transmission
-		opaqueToken = base64.URLEncoding.EncodeToString(opaqueJSON)
-	}
-
-	// Generate embedded refresh token if refresh config is available
-	var refreshToken string
-	if tb.tm.config.RefreshConfig != nil {
-		refreshToken, err = tb.tm.generateEmbeddedRefreshOpaque(tb.req, opaqueToken, 0)
-		if err != nil {
-			return nil, fmt.Errorf("failed to generate embedded refresh token: %w", err)
-		}
-	}
-
-	return &TokenResult{
-		Token:        opaqueToken,
-		RefreshToken: refreshToken,
-		Type:         TokenTypeOpaque,
-		ExpiresAt:    tb.req.ExpiresAt,
-		IssuedAt:     tb.req.IssuedAt,
-	}, nil
-}
-
-// CreateOpaqueWithKeyPair creates an opaque token using a specific key pair
-func (tb *TokenBuilder) CreateOpaqueWithKeyPair(keyPair KeyPair) (*TokenResult, error) {
-	// Set default expiration if not provided
-	if tb.req.ExpiresAt.IsZero() {
-		tb.req.ExpiresAt = time.Now().Add(tb.tm.config.DefaultExpiration)
-	}
-
-	// Set issued time if not provided
-	if tb.req.IssuedAt.IsZero() {
-		tb.req.IssuedAt = time.Now()
-	}
-
-	// Generate session_id if not provided in SessionID field or custom claims
-	if tb.req.SessionID == "" {
-		// Check if session_id is provided in custom claims
-		if sessionIDClaim, exists := tb.req.CustomClaims["session_id"]; exists {
-			if sessionIDStr, ok := sessionIDClaim.(string); ok && sessionIDStr != "" {
-				tb.req.SessionID = sessionIDStr
-			} else {
-				tb.req.SessionID = generateSessionID()
-			}
-		} else {
-			tb.req.SessionID = generateSessionID()
-		}
-	}
-
-	// Remove session_id from custom claims since it's now in the SessionID field
-	delete(tb.req.CustomClaims, "session_id")
-
-	// Extract provider_id from custom claims if provided
-	if tb.req.ProviderID == "" {
-		if providerIDClaim, exists := tb.req.CustomClaims["provider_id"]; exists {
-			if providerIDStr, ok := providerIDClaim.(string); ok && providerIDStr != "" {
-				tb.req.ProviderID = providerIDStr
-			}
-		}
-	}
-
-	// Remove provider_id from custom claims since it's now in the ProviderID field
-	delete(tb.req.CustomClaims, "provider_id")
-
-	// Create opaque token data
-	opaqueData := OpaqueTokenData{
-		TokenRequest: tb.req,
-		CreatedAt:    time.Now(),
-	}
-
-	// Serialize the token request to JSON
-	jsonData, err := json.Marshal(opaqueData.TokenRequest)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal token request: %w", err)
-	}
-
-	// Create key pair signature
-	signature, err := tb.tm.createKeyPairSignature(jsonData, keyPair)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create key pair signature: %w", err)
-	}
-
-	opaqueData.Signature = signature
-
-	// Serialize the complete opaque data
-	opaqueJSON, err := json.Marshal(opaqueData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal opaque token data: %w", err)
-	}
-
-	// Encrypt or encode the token data
-	var opaqueToken string
-	if tb.tm.config.OpaqueUseEncryption {
-		opaqueToken, err = tb.tm.encryptOpaqueToken(opaqueJSON)
-		if err != nil {
-			return nil, fmt.Errorf("failed to encrypt opaque token: %w", err)
-		}
-	} else {
-		// Encode to base64 for safe transmission
-		opaqueToken = base64.URLEncoding.EncodeToString(opaqueJSON)
-	}
-
-	// Generate embedded refresh token if refresh config is available
-	var refreshToken string
-	if tb.tm.config.RefreshConfig != nil {
-		refreshToken, err = tb.tm.generateEmbeddedRefreshOpaqueWithKeyPair(tb.req, opaqueToken, keyPair, 0)
-		if err != nil {
-			return nil, fmt.Errorf("failed to generate embedded refresh token: %w", err)
-		}
-	}
-
-	return &TokenResult{
-		Token:        opaqueToken,
-		RefreshToken: refreshToken,
-		Type:         TokenTypeOpaque,
-		ExpiresAt:    tb.req.ExpiresAt,
-		IssuedAt:     tb.req.IssuedAt,
-	}, nil
-}
-
 // CreateJWTToken creates a JWT token using the TokenManager configuration
 func (tm *TokenManager) CreateJWTToken(req TokenRequest) (*TokenResult, error) {
 	// Set default expiration if not provided
@@ -653,77 +406,9 @@ func (tm *TokenManager) CreateJWTToken(req TokenRequest) (*TokenResult, error) {
 	}, nil
 }
 
-// CreateOpaqueToken creates an opaque token (JSON-encoded TokenRequest with signature)
-func (tm *TokenManager) CreateOpaqueToken(req TokenRequest) (*TokenResult, error) {
-	// Set default expiration if not provided
-	if req.ExpiresAt.IsZero() {
-		req.ExpiresAt = time.Now().Add(tm.config.DefaultExpiration)
-	}
-
-	// Set issued time if not provided
-	if req.IssuedAt.IsZero() {
-		req.IssuedAt = time.Now()
-	}
-
-	// Create opaque token data
-	opaqueData := OpaqueTokenData{
-		TokenRequest: req,
-		CreatedAt:    time.Now(),
-	}
-
-	// Serialize the token request to JSON
-	jsonData, err := json.Marshal(opaqueData.TokenRequest)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal token request: %w", err)
-	}
-
-	// Create signature
-	signature, err := tm.createSignature(jsonData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create signature: %w", err)
-	}
-
-	opaqueData.Signature = signature
-
-	// Serialize the complete opaque data
-	opaqueJSON, err := json.Marshal(opaqueData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal opaque token data: %w", err)
-	}
-
-	// Encrypt or encode the token data
-	var opaqueToken string
-	if tm.config.OpaqueUseEncryption {
-		opaqueToken, err = tm.encryptOpaqueToken(opaqueJSON)
-		if err != nil {
-			return nil, fmt.Errorf("failed to encrypt opaque token: %w", err)
-		}
-	} else {
-		// Encode to base64 for safe transmission
-		opaqueToken = base64.URLEncoding.EncodeToString(opaqueJSON)
-	}
-
-	return &TokenResult{
-		Token:     opaqueToken,
-		Type:      TokenTypeOpaque,
-		ExpiresAt: req.ExpiresAt,
-		IssuedAt:  req.IssuedAt,
-	}, nil
-}
-
-// ValidateToken validates either JWT or opaque token based on its format
+// ValidateToken validates a JWT token
 func (tm *TokenManager) ValidateToken(token string) (*TokenRequest, error) {
-	// Try to detect token type
-	tokenType := tm.detectTokenType(token)
-
-	switch tokenType {
-	case TokenTypeJWT:
-		return tm.validateJWTToken(token)
-	case TokenTypeOpaque:
-		return tm.validateOpaqueToken(token)
-	default:
-		return nil, fmt.Errorf("unknown token type")
-	}
+	return tm.validateJWTToken(token)
 }
 
 // ValidateJWTWithHMAC validates a JWT token using HMAC
@@ -810,101 +495,12 @@ func (tm *TokenManager) ValidateJWTWithKeyPair(token string, keyPair KeyPair) (*
 	return tokenReq, nil
 }
 
-// ValidateOpaqueWithHMAC validates an opaque token using HMAC
-func (tm *TokenManager) ValidateOpaqueWithHMAC(token string, method SigningMethod) (*TokenRequest, error) {
-	// Decrypt or decode the token data
-	var opaqueJSON []byte
-	var err error
-	if tm.config.OpaqueUseEncryption {
-		opaqueJSON, err = tm.decryptOpaqueToken(token)
-		if err != nil {
-			return nil, fmt.Errorf("failed to decrypt opaque token: %w", err)
-		}
-	} else {
-		// Decode base64
-		opaqueJSON, err = base64.URLEncoding.DecodeString(token)
-		if err != nil {
-			return nil, fmt.Errorf("failed to decode opaque token: %w", err)
-		}
-	}
-
-	// Unmarshal opaque token data
-	var opaqueData OpaqueTokenData
-	if err := json.Unmarshal(opaqueJSON, &opaqueData); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal opaque token data: %w", err)
-	}
-
-	// Check if token has expired
-	if time.Now().After(opaqueData.TokenRequest.ExpiresAt) {
-		return nil, fmt.Errorf("opaque token has expired")
-	}
-
-	// Verify HMAC signature
-	jsonData, err := json.Marshal(opaqueData.TokenRequest)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal token request for verification: %w", err)
-	}
-
-	if !tm.verifyHMACSignatureWithMethod(jsonData, opaqueData.Signature, tm.config.OpaqueSecretKey, method) {
-		return nil, fmt.Errorf("opaque token HMAC signature verification failed")
-	}
-
-	return &opaqueData.TokenRequest, nil
-}
-
-// ValidateOpaqueWithKeyPair validates an opaque token using a specific key pair
-func (tm *TokenManager) ValidateOpaqueWithKeyPair(token string, keyPair KeyPair) (*TokenRequest, error) {
-	// Decrypt or decode the token data
-	var opaqueJSON []byte
-	var err error
-	if tm.config.OpaqueUseEncryption {
-		opaqueJSON, err = tm.decryptOpaqueToken(token)
-		if err != nil {
-			return nil, fmt.Errorf("failed to decrypt opaque token: %w", err)
-		}
-	} else {
-		// Decode base64
-		opaqueJSON, err = base64.URLEncoding.DecodeString(token)
-		if err != nil {
-			return nil, fmt.Errorf("failed to decode opaque token: %w", err)
-		}
-	}
-
-	// Unmarshal opaque token data
-	var opaqueData OpaqueTokenData
-	if err := json.Unmarshal(opaqueJSON, &opaqueData); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal opaque token data: %w", err)
-	}
-
-	// Check if token has expired
-	if time.Now().After(opaqueData.TokenRequest.ExpiresAt) {
-		return nil, fmt.Errorf("opaque token has expired")
-	}
-
-	// Verify key pair signature
-	jsonData, err := json.Marshal(opaqueData.TokenRequest)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal token request for verification: %w", err)
-	}
-
-	if !tm.verifyKeyPairSignature(jsonData, opaqueData.Signature, keyPair) {
-		return nil, fmt.Errorf("opaque token key pair signature verification failed")
-	}
-
-	return &opaqueData.TokenRequest, nil
-}
-
 // ValidateJWTToken validates a JWT token
 func (tm *TokenManager) ValidateJWTToken(token string) (*TokenRequest, error) {
 	return tm.validateJWTToken(token)
 }
 
-// ValidateOpaqueToken validates an opaque token
-func (tm *TokenManager) ValidateOpaqueToken(token string) (*TokenRequest, error) {
-	return tm.validateOpaqueToken(token)
-}
-
-// detectTokenType detects whether a token is JWT or opaque
+// detectTokenType detects whether a token is JWT
 func (tm *TokenManager) detectTokenType(token string) TokenType {
 	// JWT tokens have 3 parts separated by dots
 	parts := splitToken(token, ".")
@@ -915,8 +511,7 @@ func (tm *TokenManager) detectTokenType(token string) TokenType {
 		}
 	}
 
-	// If it's not JWT, assume it's opaque
-	return TokenTypeOpaque
+	return ""
 }
 
 // validateJWTToken validates a JWT token and returns the TokenRequest
@@ -971,108 +566,6 @@ func (tm *TokenManager) validateJWTToken(token string) (*TokenRequest, error) {
 	return tokenReq, nil
 }
 
-// validateOpaqueToken validates an opaque token and returns the TokenRequest
-func (tm *TokenManager) validateOpaqueToken(token string) (*TokenRequest, error) {
-	// Decrypt or decode the token data
-	var opaqueJSON []byte
-	var err error
-	if tm.config.OpaqueUseEncryption {
-		opaqueJSON, err = tm.decryptOpaqueToken(token)
-		if err != nil {
-			return nil, fmt.Errorf("failed to decrypt opaque token: %w", err)
-		}
-	} else {
-		// Decode base64
-		opaqueJSON, err = base64.URLEncoding.DecodeString(token)
-		if err != nil {
-			return nil, fmt.Errorf("failed to decode opaque token: %w", err)
-		}
-	}
-
-	// Unmarshal opaque token data
-	var opaqueData OpaqueTokenData
-	if err := json.Unmarshal(opaqueJSON, &opaqueData); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal opaque token data: %w", err)
-	}
-
-	// Check if token has expired
-	if time.Now().After(opaqueData.TokenRequest.ExpiresAt) {
-		return nil, fmt.Errorf("opaque token has expired")
-	}
-
-	// Verify signature
-	jsonData, err := json.Marshal(opaqueData.TokenRequest)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal token request for verification: %w", err)
-	}
-
-	if !tm.verifySignature(jsonData, opaqueData.Signature) {
-		return nil, fmt.Errorf("opaque token signature verification failed")
-	}
-
-	return &opaqueData.TokenRequest, nil
-}
-
-// createSignature creates a signature for the given data
-func (tm *TokenManager) createSignature(data []byte) (string, error) {
-	// Use key pair if available, otherwise fall back to secret key
-	if tm.config.OpaqueKeyPair != nil {
-		return tm.createSignatureWithKeyPair(data)
-	}
-
-	// Create signature using HMAC with the specified method
-	if len(tm.config.OpaqueSecretKey) > 0 {
-		return tm.createHMACSignatureWithMethod(data, tm.config.OpaqueSecretKey, tm.config.OpaqueMethod)
-	}
-
-	// Generate random signature if no secret key
-	signature := make([]byte, tm.config.OpaqueTokenLength)
-	if _, err := rand.Read(signature); err != nil {
-		return "", err
-	}
-
-	return base64.URLEncoding.EncodeToString(signature), nil
-}
-
-// createSignatureWithKeyPair creates a signature using a key pair
-func (tm *TokenManager) createSignatureWithKeyPair(data []byte) (string, error) {
-	// Hash the data
-	hasher := sha256.New()
-	hasher.Write(data)
-	hashedData := hasher.Sum(nil)
-
-	// Sign based on key type
-	switch key := tm.config.OpaqueKeyPair.PrivateKey.(type) {
-	case *rsa.PrivateKey:
-		signature, err := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, hashedData)
-		if err != nil {
-			return "", fmt.Errorf("failed to sign with RSA: %w", err)
-		}
-		return base64.URLEncoding.EncodeToString(signature), nil
-
-	case *ecdsa.PrivateKey:
-		r, s, err := ecdsa.Sign(rand.Reader, key, hashedData)
-		if err != nil {
-			return "", fmt.Errorf("failed to sign with ECDSA: %w", err)
-		}
-		// Encode r and s as DER
-		signature := append(r.Bytes(), s.Bytes()...)
-		return base64.URLEncoding.EncodeToString(signature), nil
-
-	case ed25519.PrivateKey:
-		signature := ed25519.Sign(key, hashedData)
-		return base64.URLEncoding.EncodeToString(signature), nil
-
-	default:
-		return "", fmt.Errorf("unsupported private key type for opaque token signing")
-	}
-}
-
-// createHMACSignature creates a signature using HMAC with secret key
-func (tm *TokenManager) createHMACSignature(data []byte) (string, error) {
-	return tm.createHMACSignatureWithMethod(data, tm.config.OpaqueSecretKey, tm.config.OpaqueMethod)
-}
-
 // createHMACSignatureWithMethod creates a signature using HMAC with specified secret key and method
 func (tm *TokenManager) createHMACSignatureWithMethod(data []byte, secretKey []byte, method SigningMethod) (string, error) {
 	// Create HMAC signature based on the method
@@ -1123,66 +616,8 @@ func (tm *TokenManager) createKeyPairSignature(data []byte, keyPair KeyPair) (st
 		return base64.URLEncoding.EncodeToString(signature), nil
 
 	default:
-		return "", fmt.Errorf("unsupported private key type for opaque token signing")
+		return "", fmt.Errorf("unsupported private key type for token signing")
 	}
-}
-
-// verifySignature verifies a signature
-func (tm *TokenManager) verifySignature(data []byte, signature string) bool {
-	// Use key pair if available, otherwise fall back to secret key
-	if tm.config.OpaqueKeyPair != nil {
-		return tm.verifySignatureWithKeyPair(data, signature)
-	}
-
-	// Verify signature using HMAC with the specified method
-	if len(tm.config.OpaqueSecretKey) > 0 {
-		return tm.verifyHMACSignatureWithMethod(data, signature, tm.config.OpaqueSecretKey, tm.config.OpaqueMethod)
-	}
-
-	// For random signatures, we can't verify them deterministically
-	// This is a fallback case and should generally be avoided
-	return false
-}
-
-// verifySignatureWithKeyPair verifies a signature using a key pair
-func (tm *TokenManager) verifySignatureWithKeyPair(data []byte, signature string) bool {
-	// Decode the signature
-	decodedSig, err := base64.URLEncoding.DecodeString(signature)
-	if err != nil {
-		return false
-	}
-
-	// Hash the data
-	hasher := sha256.New()
-	hasher.Write(data)
-	hashedData := hasher.Sum(nil)
-
-	// Verify based on key type
-	switch key := tm.config.OpaqueKeyPair.PublicKey.(type) {
-	case *rsa.PublicKey:
-		err := rsa.VerifyPKCS1v15(key, crypto.SHA256, hashedData, decodedSig)
-		return err == nil
-
-	case *ecdsa.PublicKey:
-		// For ECDSA, we need to split the signature back into r and s
-		if len(decodedSig) != 64 { // 32 bytes for r + 32 bytes for s
-			return false
-		}
-		r := new(big.Int).SetBytes(decodedSig[:32])
-		s := new(big.Int).SetBytes(decodedSig[32:])
-		return ecdsa.Verify(key, hashedData, r, s)
-
-	case ed25519.PublicKey:
-		return ed25519.Verify(key, hashedData, decodedSig)
-
-	default:
-		return false
-	}
-}
-
-// verifyHMACSignature verifies a signature using HMAC with secret key
-func (tm *TokenManager) verifyHMACSignature(data []byte, signature string) bool {
-	return tm.verifyHMACSignatureWithMethod(data, signature, tm.config.OpaqueSecretKey, tm.config.OpaqueMethod)
 }
 
 // verifyHMACSignatureWithMethod verifies a signature using HMAC with specified secret key and method
@@ -1609,83 +1044,6 @@ func (km *KeyManager) GetKeyVersions() []*KeyVersion {
 }
 
 // ============================================================================
-// Encryption/Decryption Methods for Opaque Tokens
-// ============================================================================
-
-// encryptOpaqueToken encrypts opaque token data using AES-GCM
-func (tm *TokenManager) encryptOpaqueToken(data []byte) (string, error) {
-	if len(tm.config.OpaqueEncryptionKey) == 0 {
-		return "", fmt.Errorf("encryption key not configured")
-	}
-
-	// Create a new AES cipher block
-	block, err := aes.NewCipher(tm.config.OpaqueEncryptionKey)
-	if err != nil {
-		return "", fmt.Errorf("failed to create cipher: %w", err)
-	}
-
-	// Create GCM mode
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return "", fmt.Errorf("failed to create GCM: %w", err)
-	}
-
-	// Generate a random nonce
-	nonce := make([]byte, gcm.NonceSize())
-	if _, err := rand.Read(nonce); err != nil {
-		return "", fmt.Errorf("failed to generate nonce: %w", err)
-	}
-
-	// Encrypt the data
-	ciphertext := gcm.Seal(nonce, nonce, data, nil)
-
-	// Encode to base64 for safe transmission
-	return base64.URLEncoding.EncodeToString(ciphertext), nil
-}
-
-// decryptOpaqueToken decrypts opaque token data using AES-GCM
-func (tm *TokenManager) decryptOpaqueToken(encryptedData string) ([]byte, error) {
-	if len(tm.config.OpaqueEncryptionKey) == 0 {
-		return nil, fmt.Errorf("encryption key not configured")
-	}
-
-	// Decode from base64
-	ciphertext, err := base64.URLEncoding.DecodeString(encryptedData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode base64: %w", err)
-	}
-
-	// Create a new AES cipher block
-	block, err := aes.NewCipher(tm.config.OpaqueEncryptionKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create cipher: %w", err)
-	}
-
-	// Create GCM mode
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create GCM: %w", err)
-	}
-
-	// Check if ciphertext is long enough to contain nonce
-	if len(ciphertext) < gcm.NonceSize() {
-		return nil, fmt.Errorf("ciphertext too short")
-	}
-
-	// Extract nonce and ciphertext
-	nonce := ciphertext[:gcm.NonceSize()]
-	ciphertext = ciphertext[gcm.NonceSize():]
-
-	// Decrypt the data
-	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decrypt: %w", err)
-	}
-
-	return plaintext, nil
-}
-
-// ============================================================================
 // Helper Functions
 // ============================================================================
 
@@ -1694,19 +1052,12 @@ func generateSessionID() string {
 	return GenerateSessionID()
 }
 
-// DetectTokenType detects the type of token (JWT or Opaque)
+// DetectTokenType detects the type of token (JWT)
 func DetectTokenType(token string) TokenType {
 	// JWT tokens have 3 parts separated by dots
-	// Opaque tokens are base64 encoded JSON (no dots)
 	parts := splitToken(token, ".")
 	if len(parts) == 3 {
 		return TokenTypeJWT
-	} else if len(parts) == 1 {
-		// Try to decode as base64 - if successful, it's likely an opaque token
-		_, err := base64.URLEncoding.DecodeString(token)
-		if err == nil {
-			return TokenTypeOpaque
-		}
 	}
 	return ""
 }
@@ -1793,84 +1144,6 @@ func (tm *TokenManager) generateEmbeddedRefreshJWTWithKeyPair(originalReq TokenR
 	return refreshToken, nil
 }
 
-// generateEmbeddedRefreshOpaque creates an Opaque refresh token embedded with access token info
-func (tm *TokenManager) generateEmbeddedRefreshOpaque(originalReq TokenRequest, accessToken string, attempts int) (string, error) {
-	if tm.config.RefreshConfig == nil {
-		return "", fmt.Errorf("refresh configuration not set")
-	}
-
-	// Create refresh token with longer expiration
-	refreshReq := TokenRequest{
-		Issuer:     originalReq.Issuer,
-		Subject:    originalReq.Subject,
-		Audience:   originalReq.Audience,
-		ExpiresAt:  time.Now().Add(tm.config.RefreshConfig.RefreshTokenExpiry),
-		NotBefore:  time.Now(),
-		IssuedAt:   time.Now(),
-		SessionID:  originalReq.SessionID,  // Preserve session_id from original token
-		ProviderID: originalReq.ProviderID, // Preserve provider_id from original token
-		CustomClaims: map[string]interface{}{
-			"access_token": accessToken,
-			"token_type":   "refresh",
-			"attempts":     attempts,
-		},
-	}
-
-	// Copy original custom claims
-	if originalReq.CustomClaims != nil {
-		for k, v := range originalReq.CustomClaims {
-			refreshReq.CustomClaims[k] = v
-		}
-	}
-
-	// Create Opaque refresh token
-	refreshToken, err := tm.createOpaqueToken(refreshReq)
-	if err != nil {
-		return "", fmt.Errorf("failed to create refresh Opaque: %w", err)
-	}
-
-	return refreshToken, nil
-}
-
-// generateEmbeddedRefreshOpaqueWithKeyPair creates an Opaque refresh token with key pair
-func (tm *TokenManager) generateEmbeddedRefreshOpaqueWithKeyPair(originalReq TokenRequest, accessToken string, keyPair KeyPair, attempts int) (string, error) {
-	if tm.config.RefreshConfig == nil {
-		return "", fmt.Errorf("refresh configuration not set")
-	}
-
-	// Create refresh token with longer expiration
-	refreshReq := TokenRequest{
-		Issuer:     originalReq.Issuer,
-		Subject:    originalReq.Subject,
-		Audience:   originalReq.Audience,
-		ExpiresAt:  time.Now().Add(tm.config.RefreshConfig.RefreshTokenExpiry),
-		NotBefore:  time.Now(),
-		IssuedAt:   time.Now(),
-		SessionID:  originalReq.SessionID,  // Preserve session_id from original token
-		ProviderID: originalReq.ProviderID, // Preserve provider_id from original token
-		CustomClaims: map[string]interface{}{
-			"access_token": accessToken,
-			"token_type":   "refresh",
-			"attempts":     attempts,
-		},
-	}
-
-	// Copy original custom claims
-	if originalReq.CustomClaims != nil {
-		for k, v := range originalReq.CustomClaims {
-			refreshReq.CustomClaims[k] = v
-		}
-	}
-
-	// Create Opaque refresh token with key pair
-	refreshToken, err := tm.createOpaqueTokenWithKeyPair(refreshReq, keyPair)
-	if err != nil {
-		return "", fmt.Errorf("failed to create refresh Opaque with key pair: %w", err)
-	}
-
-	return refreshToken, nil
-}
-
 // RefreshToken refreshes an access token using an embedded refresh token
 func (tm *TokenManager) RefreshToken(refreshToken string) (*TokenResult, error) {
 	if tm.config.RefreshConfig == nil {
@@ -1879,24 +1152,17 @@ func (tm *TokenManager) RefreshToken(refreshToken string) (*TokenResult, error) 
 
 	// Parse the refresh token to get its claims
 	tokenType := DetectTokenType(refreshToken)
+	if tokenType != TokenTypeJWT {
+		return nil, fmt.Errorf("only JWT refresh tokens are supported")
+	}
+
 	var refreshClaims *TokenRequest
 	var err error
 
-	switch tokenType {
-	case TokenTypeJWT:
-		if tm.config.JWTKeyPair != nil {
-			refreshClaims, err = tm.ValidateJWTWithKeyPair(refreshToken, *tm.config.JWTKeyPair)
-		} else {
-			refreshClaims, err = tm.ValidateJWTWithHMAC(refreshToken, tm.config.JWTMethod)
-		}
-	case TokenTypeOpaque:
-		if tm.config.OpaqueKeyPair != nil {
-			refreshClaims, err = tm.ValidateOpaqueWithKeyPair(refreshToken, *tm.config.OpaqueKeyPair)
-		} else {
-			refreshClaims, err = tm.ValidateOpaqueWithHMAC(refreshToken, tm.config.OpaqueMethod)
-		}
-	default:
-		return nil, fmt.Errorf("unknown refresh token type")
+	if tm.config.JWTKeyPair != nil {
+		refreshClaims, err = tm.ValidateJWTWithKeyPair(refreshToken, *tm.config.JWTKeyPair)
+	} else {
+		refreshClaims, err = tm.ValidateJWTWithHMAC(refreshToken, tm.config.JWTMethod)
 	}
 
 	if err != nil {
@@ -1975,18 +1241,10 @@ func (tm *TokenManager) RefreshToken(refreshToken string) (*TokenResult, error) 
 	var result *TokenResult
 	var createErr error
 
-	if tokenType == TokenTypeJWT {
-		if tm.config.JWTKeyPair != nil {
-			result, createErr = tokenBuilder.CreateJWTWithKeyPair(*tm.config.JWTKeyPair)
-		} else {
-			result, createErr = tokenBuilder.CreateJWTWithHMAC(tm.config.JWTMethod)
-		}
+	if tm.config.JWTKeyPair != nil {
+		result, createErr = tokenBuilder.CreateJWTWithKeyPair(*tm.config.JWTKeyPair)
 	} else {
-		if tm.config.OpaqueKeyPair != nil {
-			result, createErr = tokenBuilder.CreateOpaqueWithKeyPair(*tm.config.OpaqueKeyPair)
-		} else {
-			result, createErr = tokenBuilder.CreateOpaqueWithHMAC(tm.config.OpaqueMethod)
-		}
+		result, createErr = tokenBuilder.CreateJWTWithHMAC(tm.config.JWTMethod)
 	}
 
 	if createErr != nil {
@@ -1995,18 +1253,10 @@ func (tm *TokenManager) RefreshToken(refreshToken string) (*TokenResult, error) 
 
 	// Create new refresh token with incremented attempts counter
 	var newRefreshToken string
-	if tokenType == TokenTypeJWT {
-		if tm.config.JWTKeyPair != nil {
-			newRefreshToken, createErr = tm.generateEmbeddedRefreshJWTWithKeyPair(newTokenReq, result.Token, *tm.config.JWTKeyPair, attempts+1)
-		} else {
-			newRefreshToken, createErr = tm.generateEmbeddedRefreshJWT(newTokenReq, result.Token, attempts+1)
-		}
+	if tm.config.JWTKeyPair != nil {
+		newRefreshToken, createErr = tm.generateEmbeddedRefreshJWTWithKeyPair(newTokenReq, result.Token, *tm.config.JWTKeyPair, attempts+1)
 	} else {
-		if tm.config.OpaqueKeyPair != nil {
-			newRefreshToken, createErr = tm.generateEmbeddedRefreshOpaqueWithKeyPair(newTokenReq, result.Token, *tm.config.OpaqueKeyPair, attempts+1)
-		} else {
-			newRefreshToken, createErr = tm.generateEmbeddedRefreshOpaque(newTokenReq, result.Token, attempts+1)
-		}
+		newRefreshToken, createErr = tm.generateEmbeddedRefreshJWT(newTokenReq, result.Token, attempts+1)
 	}
 
 	if createErr != nil {
@@ -2022,105 +1272,13 @@ func (tm *TokenManager) RefreshToken(refreshToken string) (*TokenResult, error) 
 // parseAccessToken parses an access token and returns its claims
 func (tm *TokenManager) parseAccessToken(accessToken string) (*TokenRequest, error) {
 	tokenType := DetectTokenType(accessToken)
-
-	switch tokenType {
-	case TokenTypeJWT:
-		if tm.config.JWTKeyPair != nil {
-			return tm.ValidateJWTWithKeyPair(accessToken, *tm.config.JWTKeyPair)
-		} else {
-			return tm.ValidateJWTWithHMAC(accessToken, tm.config.JWTMethod)
-		}
-	case TokenTypeOpaque:
-		if tm.config.OpaqueKeyPair != nil {
-			return tm.ValidateOpaqueWithKeyPair(accessToken, *tm.config.OpaqueKeyPair)
-		} else {
-			return tm.ValidateOpaqueWithHMAC(accessToken, tm.config.OpaqueMethod)
-		}
-	default:
-		return nil, fmt.Errorf("unknown token type")
-	}
-}
-
-// createOpaqueToken creates an opaque token using HMAC
-func (tm *TokenManager) createOpaqueToken(req TokenRequest) (string, error) {
-	// Set issued time if not provided
-	if req.IssuedAt.IsZero() {
-		req.IssuedAt = time.Now()
+	if tokenType != TokenTypeJWT {
+		return nil, fmt.Errorf("only JWT tokens are supported")
 	}
 
-	// Create opaque token data
-	opaqueData := OpaqueTokenData{
-		TokenRequest: req,
-		CreatedAt:    time.Now(),
-	}
-
-	// Serialize the token request to JSON
-	jsonData, err := json.Marshal(opaqueData.TokenRequest)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal token request: %w", err)
-	}
-
-	// Create HMAC signature
-	signature, err := tm.createHMACSignatureWithMethod(jsonData, tm.config.OpaqueSecretKey, tm.config.OpaqueMethod)
-	if err != nil {
-		return "", fmt.Errorf("failed to create HMAC signature: %w", err)
-	}
-
-	opaqueData.Signature = signature
-
-	// Serialize the complete opaque data
-	opaqueJSON, err := json.Marshal(opaqueData)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal opaque token data: %w", err)
-	}
-
-	// Encrypt or encode the token data
-	if tm.config.OpaqueUseEncryption {
-		return tm.encryptOpaqueToken(opaqueJSON)
+	if tm.config.JWTKeyPair != nil {
+		return tm.ValidateJWTWithKeyPair(accessToken, *tm.config.JWTKeyPair)
 	} else {
-		// Encode to base64 for safe transmission
-		return base64.URLEncoding.EncodeToString(opaqueJSON), nil
-	}
-}
-
-// createOpaqueTokenWithKeyPair creates an opaque token using a key pair
-func (tm *TokenManager) createOpaqueTokenWithKeyPair(req TokenRequest, keyPair KeyPair) (string, error) {
-	// Set issued time if not provided
-	if req.IssuedAt.IsZero() {
-		req.IssuedAt = time.Now()
-	}
-
-	// Create opaque token data
-	opaqueData := OpaqueTokenData{
-		TokenRequest: req,
-		CreatedAt:    time.Now(),
-	}
-
-	// Serialize the token request to JSON
-	jsonData, err := json.Marshal(opaqueData.TokenRequest)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal token request: %w", err)
-	}
-
-	// Create key pair signature
-	signature, err := tm.createKeyPairSignature(jsonData, keyPair)
-	if err != nil {
-		return "", fmt.Errorf("failed to create key pair signature: %w", err)
-	}
-
-	opaqueData.Signature = signature
-
-	// Serialize the complete opaque data
-	opaqueJSON, err := json.Marshal(opaqueData)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal opaque token data: %w", err)
-	}
-
-	// Encrypt or encode the token data
-	if tm.config.OpaqueUseEncryption {
-		return tm.encryptOpaqueToken(opaqueJSON)
-	} else {
-		// Encode to base64 for safe transmission
-		return base64.URLEncoding.EncodeToString(opaqueJSON), nil
+		return tm.ValidateJWTWithHMAC(accessToken, tm.config.JWTMethod)
 	}
 }

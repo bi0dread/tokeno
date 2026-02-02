@@ -70,32 +70,32 @@ func main() {
 	fmt.Println("\n3. Creating Opaque Token with Embedded Refresh Token:")
 	fmt.Println("=====================================================")
 
-	opaqueResult, err := tm.NewToken().
+	jwtResult2, err := tm.NewToken().
 		WithIssuer("tokeno-service").
 		WithSubject("user456").
 		WithAudience("api-clients").
 		WithExpiration(time.Now().Add(2*time.Hour)).
 		WithClaim("role", "user").
 		WithClaim("department", "engineering").
-		CreateOpaqueWithHMAC(tokeno.SigningMethodHS256)
+		CreateJWTWithHMAC(tokeno.SigningMethodHS256)
 
 	if err != nil {
-		log.Fatalf("Failed to create Opaque token: %v", err)
+		log.Fatalf("Failed to create JWT token: %v", err)
 	}
 
-	fmt.Printf("✅ Opaque Access Token: %s...\n", opaqueResult.Token[:50])
-	fmt.Printf("✅ Opaque Refresh Token: %s...\n", opaqueResult.RefreshToken[:50])
-	fmt.Printf("✅ Access Token Expires At: %s\n", opaqueResult.ExpiresAt.Format(time.RFC3339))
-	fmt.Printf("✅ Token Type: %s\n", opaqueResult.Type)
+	fmt.Printf("✅ JWT Access Token: %s...\n", jwtResult2.Token[:50])
+	fmt.Printf("✅ JWT Refresh Token: %s...\n", jwtResult2.RefreshToken[:50])
+	fmt.Printf("✅ Access Token Expires At: %s\n", jwtResult2.ExpiresAt.Format(time.RFC3339))
+	fmt.Printf("✅ Token Type: %s\n", jwtResult2.Type)
 
-	// 4. Inspect the Embedded Opaque Refresh Token
-	fmt.Println("\n4. Inspecting Embedded Opaque Refresh Token:")
-	fmt.Println("===========================================")
+	// 4. Inspect the Embedded JWT Refresh Token
+	fmt.Println("\n4. Inspecting Embedded JWT Refresh Token:")
+	fmt.Println("=========================================")
 
-	// Parse the opaque refresh token
-	opaqueRefreshClaims, err := tm.ValidateOpaqueWithHMAC(opaqueResult.RefreshToken, tokeno.SigningMethodHS256)
+	// Parse the JWT refresh token
+	jwtRefreshClaims, err := tm.ValidateJWTWithHMAC(jwtResult2.RefreshToken, tokeno.SigningMethodHS256)
 	if err != nil {
-		log.Fatalf("Failed to validate opaque refresh token: %v", err)
+		log.Fatalf("Failed to validate JWT refresh token: %v", err)
 	}
 
 	fmt.Printf("✅ Refresh Token Subject: %s\n", opaqueRefreshClaims.Subject)
@@ -130,27 +130,27 @@ func main() {
 		fmt.Printf("✅ Refreshed Claim: %t\n", refreshed)
 	}
 
-	// 6. Refresh Opaque Token
-	fmt.Println("\n6. Refreshing Opaque Token:")
-	fmt.Println("===========================")
+	// 6. Refresh JWT Token (second example)
+	fmt.Println("\n6. Refreshing JWT Token (second example):")
+	fmt.Println("=========================================")
 
-	refreshedOpaque, err := tm.RefreshToken(opaqueResult.RefreshToken)
+	refreshedJWT2, err := tm.RefreshToken(jwtResult2.RefreshToken)
 	if err != nil {
-		log.Fatalf("Failed to refresh Opaque token: %v", err)
+		log.Fatalf("Failed to refresh JWT token: %v", err)
 	}
 
-	fmt.Printf("✅ New Opaque Access Token: %s...\n", refreshedOpaque.Token[:50])
-	fmt.Printf("✅ New Opaque Refresh Token: %s...\n", refreshedOpaque.RefreshToken[:50])
-	fmt.Printf("✅ New Expires At: %s\n", refreshedOpaque.ExpiresAt.Format(time.RFC3339))
+	fmt.Printf("✅ New JWT Access Token: %s...\n", refreshedJWT2.Token[:50])
+	fmt.Printf("✅ New JWT Refresh Token: %s...\n", refreshedJWT2.RefreshToken[:50])
+	fmt.Printf("✅ New Expires At: %s\n", refreshedJWT2.ExpiresAt.Format(time.RFC3339))
 
-	// Validate the refreshed opaque token
-	validatedOpaque, err := tm.ValidateOpaqueWithHMAC(refreshedOpaque.Token, tokeno.SigningMethodHS256)
+	// Validate the refreshed JWT token
+	validatedJWT2, err := tm.ValidateJWTWithHMAC(refreshedJWT2.Token, tokeno.SigningMethodHS256)
 	if err != nil {
-		log.Fatalf("Failed to validate refreshed Opaque: %v", err)
+		log.Fatalf("Failed to validate refreshed JWT: %v", err)
 	}
 
-	fmt.Printf("✅ Validated Subject: %s\n", validatedOpaque.Subject)
-	fmt.Printf("✅ Validated Department: %s\n", validatedOpaque.CustomClaims["department"])
+	fmt.Printf("✅ Validated Subject: %s\n", validatedJWT2.Subject)
+	fmt.Printf("✅ Validated Department: %s\n", validatedJWT2.CustomClaims["department"])
 
 	// 7. Demonstrate Token Without Refresh Config
 	fmt.Println("\n7. Token Without Refresh Config:")

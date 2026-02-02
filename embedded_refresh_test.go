@@ -76,8 +76,7 @@ func TestEmbeddedRefreshJWT(t *testing.T) {
 func TestEmbeddedRefreshOpaque(t *testing.T) {
 	// Create TokenManager with refresh config
 	config := &TokenManagerConfig{
-		OpaqueSecretKey: []byte("test-opaque-secret"),
-		OpaqueMethod:    SigningMethodHS256,
+		JWTSecretKey: []byte("test-jwt-secret"),
 		RefreshConfig: &TokenRefreshConfig{
 			RefreshThreshold:   1 * time.Hour,
 			MaxRefreshAttempts: 3,
@@ -88,17 +87,17 @@ func TestEmbeddedRefreshOpaque(t *testing.T) {
 
 	tm := NewTokenManager(config)
 
-	// Create Opaque token with embedded refresh token
+	// Create JWT token with embedded refresh token
 	tokenResult, err := tm.NewToken().
 		WithIssuer("test-issuer").
 		WithSubject("user456").
 		WithAudience("test-audience").
 		WithExpiration(time.Now().Add(1*time.Hour)).
 		WithClaim("role", "user").
-		CreateOpaqueWithHMAC(SigningMethodHS256)
+		CreateJWTWithHMAC(SigningMethodHS256)
 
 	if err != nil {
-		t.Fatalf("Failed to create Opaque token: %v", err)
+		t.Fatalf("Failed to create JWT token: %v", err)
 	}
 
 	// Verify both access token and refresh token are present
@@ -110,12 +109,12 @@ func TestEmbeddedRefreshOpaque(t *testing.T) {
 		t.Error("Expected refresh token to be present")
 	}
 
-	if tokenResult.Type != TokenTypeOpaque {
-		t.Errorf("Expected token type to be Opaque, got %s", tokenResult.Type)
+	if tokenResult.Type != TokenTypeJWT {
+		t.Errorf("Expected token type to be JWT, got %s", tokenResult.Type)
 	}
 
-	// Verify refresh token is a valid Opaque token
-	refreshClaims, err := tm.ValidateOpaqueWithHMAC(tokenResult.RefreshToken, SigningMethodHS256)
+	// Verify refresh token is a valid JWT token
+	refreshClaims, err := tm.ValidateJWTWithHMAC(tokenResult.RefreshToken, SigningMethodHS256)
 	if err != nil {
 		t.Fatalf("Failed to validate refresh token: %v", err)
 	}

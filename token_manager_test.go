@@ -10,8 +10,6 @@ import (
 func TestNewTokenManager(t *testing.T) {
 	config := &TokenManagerConfig{
 		JWTSecretKey:      []byte("test-secret"),
-		OpaqueSecretKey:   []byte("opaque-secret"),
-		OpaqueTokenLength: 16,
 		DefaultExpiration: 2 * time.Hour,
 	}
 
@@ -25,14 +23,6 @@ func TestNewTokenManager(t *testing.T) {
 		t.Error("JWTSecretKey should be set")
 	}
 
-	if tm.config.OpaqueSecretKey == nil {
-		t.Error("OpaqueSecretKey should be set")
-	}
-
-	if tm.config.OpaqueTokenLength != 16 {
-		t.Errorf("Expected OpaqueTokenLength 16, got %d", tm.config.OpaqueTokenLength)
-	}
-
 	if tm.config.DefaultExpiration != 2*time.Hour {
 		t.Errorf("Expected DefaultExpiration 2h, got %v", tm.config.DefaultExpiration)
 	}
@@ -40,15 +30,10 @@ func TestNewTokenManager(t *testing.T) {
 
 func TestNewTokenManagerWithDefaults(t *testing.T) {
 	config := &TokenManagerConfig{
-		JWTSecretKey:    []byte("test-secret"),
-		OpaqueSecretKey: []byte("opaque-secret"),
+		JWTSecretKey: []byte("test-secret"),
 	}
 
 	tm := NewTokenManager(config)
-
-	if tm.config.OpaqueTokenLength == 0 {
-		t.Error("OpaqueTokenLength should have default value")
-	}
 
 	if tm.config.DefaultExpiration == 0 {
 		t.Error("DefaultExpiration should have default value")
@@ -61,8 +46,7 @@ func TestNewTokenManagerWithDefaults(t *testing.T) {
 
 func TestTokenManagerCreateJWTToken(t *testing.T) {
 	config := &TokenManagerConfig{
-		JWTSecretKey:    []byte("test-secret"),
-		OpaqueSecretKey: []byte("opaque-secret"),
+		JWTSecretKey: []byte("test-secret"),
 	}
 
 	tm := NewTokenManager(config)
@@ -106,57 +90,9 @@ func TestTokenManagerCreateJWTToken(t *testing.T) {
 	}
 }
 
-func TestTokenManagerCreateOpaqueToken(t *testing.T) {
-	config := &TokenManagerConfig{
-		JWTSecretKey:    []byte("test-secret"),
-		OpaqueSecretKey: []byte("opaque-secret"),
-	}
-
-	tm := NewTokenManager(config)
-
-	now := time.Now()
-	tokenReq := TokenRequest{
-		Issuer:    "test-issuer",
-		Subject:   "test-subject",
-		Audience:  "test-audience",
-		ExpiresAt: now.Add(time.Hour),
-		NotBefore: now,
-		IssuedAt:  now,
-		CustomClaims: map[string]interface{}{
-			"role": "user",
-		},
-	}
-
-	result, err := tm.CreateOpaqueToken(tokenReq)
-	if err != nil {
-		t.Fatalf("Failed to create opaque token: %v", err)
-	}
-
-	if result == nil {
-		t.Fatal("Result should not be nil")
-	}
-
-	if result.Type != TokenTypeOpaque {
-		t.Errorf("Expected token type Opaque, got %s", result.Type)
-	}
-
-	if result.Token == "" {
-		t.Error("Token should not be empty")
-	}
-
-	if result.ExpiresAt != tokenReq.ExpiresAt {
-		t.Error("ExpiresAt should match token request")
-	}
-
-	if result.IssuedAt != tokenReq.IssuedAt {
-		t.Error("IssuedAt should match token request")
-	}
-}
-
 func TestTokenManagerValidateJWTToken(t *testing.T) {
 	config := &TokenManagerConfig{
-		JWTSecretKey:    []byte("test-secret"),
-		OpaqueSecretKey: []byte("opaque-secret"),
+		JWTSecretKey: []byte("test-secret"),
 	}
 
 	tm := NewTokenManager(config)
@@ -209,66 +145,9 @@ func TestTokenManagerValidateJWTToken(t *testing.T) {
 	}
 }
 
-func TestTokenManagerValidateOpaqueToken(t *testing.T) {
-	config := &TokenManagerConfig{
-		JWTSecretKey:    []byte("test-secret"),
-		OpaqueSecretKey: []byte("opaque-secret"),
-	}
-
-	tm := NewTokenManager(config)
-
-	now := time.Now()
-	tokenReq := TokenRequest{
-		Issuer:    "test-issuer",
-		Subject:   "test-subject",
-		Audience:  "test-audience",
-		ExpiresAt: now.Add(time.Hour),
-		NotBefore: now,
-		IssuedAt:  now,
-		CustomClaims: map[string]interface{}{
-			"role": "user",
-		},
-	}
-
-	// Create opaque token
-	result, err := tm.CreateOpaqueToken(tokenReq)
-	if err != nil {
-		t.Fatalf("Failed to create opaque token: %v", err)
-	}
-
-	// Validate opaque token
-	validatedReq, err := tm.ValidateOpaqueToken(result.Token)
-	if err != nil {
-		t.Fatalf("Failed to validate opaque token: %v", err)
-	}
-
-	if validatedReq == nil {
-		t.Fatal("Validated request should not be nil")
-	}
-
-	// Check basic claims
-	if validatedReq.Issuer != tokenReq.Issuer {
-		t.Errorf("Expected issuer %s, got %s", tokenReq.Issuer, validatedReq.Issuer)
-	}
-
-	if validatedReq.Subject != tokenReq.Subject {
-		t.Errorf("Expected subject %s, got %s", tokenReq.Subject, validatedReq.Subject)
-	}
-
-	if validatedReq.Audience != tokenReq.Audience {
-		t.Errorf("Expected audience %s, got %s", tokenReq.Audience, validatedReq.Audience)
-	}
-
-	// Check custom claims
-	if validatedReq.CustomClaims["role"] != tokenReq.CustomClaims["role"] {
-		t.Errorf("Expected role %v, got %v", tokenReq.CustomClaims["role"], validatedReq.CustomClaims["role"])
-	}
-}
-
 func TestTokenManagerValidateToken(t *testing.T) {
 	config := &TokenManagerConfig{
-		JWTSecretKey:    []byte("test-secret"),
-		OpaqueSecretKey: []byte("opaque-secret"),
+		JWTSecretKey: []byte("test-secret"),
 	}
 
 	tm := NewTokenManager(config)
@@ -300,27 +179,11 @@ func TestTokenManagerValidateToken(t *testing.T) {
 	if validatedReq.Issuer != tokenReq.Issuer {
 		t.Errorf("JWT validation failed: expected issuer %s, got %s", tokenReq.Issuer, validatedReq.Issuer)
 	}
-
-	// Test opaque token validation
-	opaqueResult, err := tm.CreateOpaqueToken(tokenReq)
-	if err != nil {
-		t.Fatalf("Failed to create opaque token: %v", err)
-	}
-
-	validatedReq, err = tm.ValidateToken(opaqueResult.Token)
-	if err != nil {
-		t.Fatalf("Failed to validate opaque token: %v", err)
-	}
-
-	if validatedReq.Issuer != tokenReq.Issuer {
-		t.Errorf("Opaque validation failed: expected issuer %s, got %s", tokenReq.Issuer, validatedReq.Issuer)
-	}
 }
 
 func TestTokenManagerDetectTokenType(t *testing.T) {
 	config := &TokenManagerConfig{
-		JWTSecretKey:    []byte("test-secret"),
-		OpaqueSecretKey: []byte("opaque-secret"),
+		JWTSecretKey: []byte("test-secret"),
 	}
 
 	tm := NewTokenManager(config)
@@ -330,13 +193,6 @@ func TestTokenManagerDetectTokenType(t *testing.T) {
 	tokenType := tm.detectTokenType(jwtToken)
 	if tokenType != TokenTypeJWT {
 		t.Errorf("Expected JWT token type, got %s", tokenType)
-	}
-
-	// Test opaque token detection
-	opaqueToken := "dGVzdC1vcGFxdWUtdG9rZW4="
-	tokenType = tm.detectTokenType(opaqueToken)
-	if tokenType != TokenTypeOpaque {
-		t.Errorf("Expected Opaque token type, got %s", tokenType)
 	}
 }
 
@@ -348,9 +204,8 @@ func TestTokenManagerWithJWTKeyPair(t *testing.T) {
 	}
 
 	config := &TokenManagerConfig{
-		JWTSecretKey:    []byte("test-secret"),
-		OpaqueSecretKey: []byte("opaque-secret"),
-		JWTKeyPair:      keyPair,
+		JWTSecretKey: []byte("test-secret"),
+		JWTKeyPair:   keyPair,
 	}
 
 	tm := NewTokenManager(config)
@@ -382,144 +237,9 @@ func TestTokenManagerWithJWTKeyPair(t *testing.T) {
 	}
 }
 
-func TestTokenManagerWithOpaqueKeyPair(t *testing.T) {
-	// Generate RSA key pair for opaque tokens
-	keyPair, err := GenerateRSAKeyPair(2048)
-	if err != nil {
-		t.Fatalf("Failed to generate RSA key pair: %v", err)
-	}
-
-	config := &TokenManagerConfig{
-		JWTSecretKey:    []byte("test-secret"),
-		OpaqueSecretKey: []byte("opaque-secret"),
-		OpaqueKeyPair:   keyPair,
-	}
-
-	tm := NewTokenManager(config)
-
-	now := time.Now()
-	tokenReq := TokenRequest{
-		Issuer:    "test-issuer",
-		Subject:   "test-subject",
-		Audience:  "test-audience",
-		ExpiresAt: now.Add(time.Hour),
-		NotBefore: now,
-		IssuedAt:  now,
-		CustomClaims: map[string]interface{}{
-			"role": "user",
-		},
-	}
-
-	// Create opaque token with key pair
-	result, err := tm.CreateOpaqueToken(tokenReq)
-	if err != nil {
-		t.Fatalf("Failed to create opaque token with key pair: %v", err)
-	}
-
-	// Validate opaque token
-	validatedReq, err := tm.ValidateOpaqueToken(result.Token)
-	if err != nil {
-		t.Fatalf("Failed to validate opaque token with key pair: %v", err)
-	}
-
-	if validatedReq.Issuer != tokenReq.Issuer {
-		t.Errorf("Expected issuer %s, got %s", tokenReq.Issuer, validatedReq.Issuer)
-	}
-
-	if validatedReq.CustomClaims["role"] != tokenReq.CustomClaims["role"] {
-		t.Errorf("Expected role %v, got %v", tokenReq.CustomClaims["role"], validatedReq.CustomClaims["role"])
-	}
-}
-
-func TestTokenManagerWithECDSAOpaqueKeyPair(t *testing.T) {
-	// Generate ECDSA key pair for opaque tokens
-	keyPair, err := GenerateECDSAKeyPair(elliptic.P256())
-	if err != nil {
-		t.Fatalf("Failed to generate ECDSA key pair: %v", err)
-	}
-
-	config := &TokenManagerConfig{
-		JWTSecretKey:    []byte("test-secret"),
-		OpaqueSecretKey: []byte("opaque-secret"),
-		OpaqueKeyPair:   keyPair,
-	}
-
-	tm := NewTokenManager(config)
-
-	now := time.Now()
-	tokenReq := TokenRequest{
-		Issuer:    "test-issuer",
-		Subject:   "test-subject",
-		Audience:  "test-audience",
-		ExpiresAt: now.Add(time.Hour),
-		NotBefore: now,
-		IssuedAt:  now,
-	}
-
-	// Create opaque token with ECDSA key pair
-	result, err := tm.CreateOpaqueToken(tokenReq)
-	if err != nil {
-		t.Fatalf("Failed to create opaque token with ECDSA key pair: %v", err)
-	}
-
-	// Validate opaque token
-	validatedReq, err := tm.ValidateOpaqueToken(result.Token)
-	if err != nil {
-		t.Fatalf("Failed to validate opaque token with ECDSA key pair: %v", err)
-	}
-
-	if validatedReq.Issuer != tokenReq.Issuer {
-		t.Errorf("Expected issuer %s, got %s", tokenReq.Issuer, validatedReq.Issuer)
-	}
-}
-
-func TestTokenManagerWithEdDSAOpaqueKeyPair(t *testing.T) {
-	// Generate EdDSA key pair for opaque tokens
-	keyPair, err := GenerateEdDSAKeyPair()
-	if err != nil {
-		t.Fatalf("Failed to generate EdDSA key pair: %v", err)
-	}
-
-	config := &TokenManagerConfig{
-		JWTSecretKey:    []byte("test-secret"),
-		OpaqueSecretKey: []byte("opaque-secret"),
-		OpaqueKeyPair:   keyPair,
-	}
-
-	tm := NewTokenManager(config)
-
-	now := time.Now()
-	tokenReq := TokenRequest{
-		Issuer:    "test-issuer",
-		Subject:   "test-subject",
-		Audience:  "test-audience",
-		ExpiresAt: now.Add(time.Hour),
-		NotBefore: now,
-		IssuedAt:  now,
-	}
-
-	// Create opaque token with EdDSA key pair
-	result, err := tm.CreateOpaqueToken(tokenReq)
-	if err != nil {
-		t.Fatalf("Failed to create opaque token with EdDSA key pair: %v", err)
-	}
-
-	// Validate opaque token
-	validatedReq, err := tm.ValidateOpaqueToken(result.Token)
-	if err != nil {
-		t.Fatalf("Failed to validate opaque token with EdDSA key pair: %v", err)
-	}
-
-	if validatedReq.Issuer != tokenReq.Issuer {
-		t.Errorf("Expected issuer %s, got %s", tokenReq.Issuer, validatedReq.Issuer)
-	}
-}
-
 func TestTokenManagerExplicitHMACFunctions(t *testing.T) {
 	config := &TokenManagerConfig{
 		JWTSecretKey:      []byte("test-jwt-secret"),
-		OpaqueSecretKey:   []byte("test-opaque-secret"),
-		OpaqueTokenLength: 32,
 		DefaultExpiration: time.Hour,
 	}
 
@@ -561,30 +281,6 @@ func TestTokenManagerExplicitHMACFunctions(t *testing.T) {
 	if validatedJWT.Issuer != tokenReq.Issuer {
 		t.Errorf("Expected issuer %s, got %s", tokenReq.Issuer, validatedJWT.Issuer)
 	}
-
-	// Test Opaque HMAC creation and validation using TokenBuilder
-	opaqueResult, err := tm.NewToken().
-		WithIssuer(tokenReq.Issuer).
-		WithSubject(tokenReq.Subject).
-		WithAudience(tokenReq.Audience).
-		WithExpiration(tokenReq.ExpiresAt).
-		WithNotBefore(tokenReq.NotBefore).
-		WithIssuedAt(tokenReq.IssuedAt).
-		WithClaims(tokenReq.CustomClaims).
-		CreateOpaqueWithHMAC(SigningMethodHS256)
-
-	if err != nil {
-		t.Fatalf("Failed to create opaque token with HMAC: %v", err)
-	}
-
-	validatedOpaque, err := tm.ValidateOpaqueWithHMAC(opaqueResult.Token, SigningMethodHS256)
-	if err != nil {
-		t.Fatalf("Failed to validate opaque token with HMAC: %v", err)
-	}
-
-	if validatedOpaque.Issuer != tokenReq.Issuer {
-		t.Errorf("Expected issuer %s, got %s", tokenReq.Issuer, validatedOpaque.Issuer)
-	}
 }
 
 func TestTokenManagerExplicitKeyPairFunctions(t *testing.T) {
@@ -596,8 +292,6 @@ func TestTokenManagerExplicitKeyPairFunctions(t *testing.T) {
 
 	config := &TokenManagerConfig{
 		JWTSecretKey:      []byte("test-jwt-secret"),
-		OpaqueSecretKey:   []byte("test-opaque-secret"),
-		OpaqueTokenLength: 32,
 		DefaultExpiration: time.Hour,
 	}
 
@@ -640,29 +334,6 @@ func TestTokenManagerExplicitKeyPairFunctions(t *testing.T) {
 		t.Errorf("Expected issuer %s, got %s", tokenReq.Issuer, validatedJWT.Issuer)
 	}
 
-	// Test Opaque with key pair creation and validation using TokenBuilder
-	opaqueResult, err := tm.NewToken().
-		WithIssuer(tokenReq.Issuer).
-		WithSubject(tokenReq.Subject).
-		WithAudience(tokenReq.Audience).
-		WithExpiration(tokenReq.ExpiresAt).
-		WithNotBefore(tokenReq.NotBefore).
-		WithIssuedAt(tokenReq.IssuedAt).
-		WithClaims(tokenReq.CustomClaims).
-		CreateOpaqueWithKeyPair(*keyPair)
-
-	if err != nil {
-		t.Fatalf("Failed to create opaque token with key pair: %v", err)
-	}
-
-	validatedOpaque, err := tm.ValidateOpaqueWithKeyPair(opaqueResult.Token, *keyPair)
-	if err != nil {
-		t.Fatalf("Failed to validate opaque token with key pair: %v", err)
-	}
-
-	if validatedOpaque.Issuer != tokenReq.Issuer {
-		t.Errorf("Expected issuer %s, got %s", tokenReq.Issuer, validatedOpaque.Issuer)
-	}
 }
 
 func TestTokenManagerExplicitECDSAFunctions(t *testing.T) {
@@ -674,8 +345,6 @@ func TestTokenManagerExplicitECDSAFunctions(t *testing.T) {
 
 	config := &TokenManagerConfig{
 		JWTSecretKey:      []byte("test-jwt-secret"),
-		OpaqueSecretKey:   []byte("test-opaque-secret"),
-		OpaqueTokenLength: 32,
 		DefaultExpiration: time.Hour,
 	}
 
@@ -714,71 +383,11 @@ func TestTokenManagerExplicitECDSAFunctions(t *testing.T) {
 		t.Errorf("Expected issuer %s, got %s", tokenReq.Issuer, validatedJWT.Issuer)
 	}
 
-	// Test Opaque with ECDSA key pair using TokenBuilder
-	opaqueResult, err := tm.NewToken().
-		WithIssuer(tokenReq.Issuer).
-		WithSubject(tokenReq.Subject).
-		WithAudience(tokenReq.Audience).
-		WithExpiration(tokenReq.ExpiresAt).
-		WithNotBefore(tokenReq.NotBefore).
-		WithIssuedAt(tokenReq.IssuedAt).
-		CreateOpaqueWithKeyPair(*keyPair)
-
-	if err != nil {
-		t.Fatalf("Failed to create opaque token with ECDSA key pair: %v", err)
-	}
-
-	validatedOpaque, err := tm.ValidateOpaqueWithKeyPair(opaqueResult.Token, *keyPair)
-	if err != nil {
-		t.Fatalf("Failed to validate opaque token with ECDSA key pair: %v", err)
-	}
-
-	if validatedOpaque.Issuer != tokenReq.Issuer {
-		t.Errorf("Expected issuer %s, got %s", tokenReq.Issuer, validatedOpaque.Issuer)
-	}
-}
-
-func TestTokenManagerExpiredToken(t *testing.T) {
-	config := &TokenManagerConfig{
-		JWTSecretKey:    []byte("test-secret"),
-		OpaqueSecretKey: []byte("opaque-secret"),
-	}
-
-	tm := NewTokenManager(config)
-
-	now := time.Now()
-	tokenReq := TokenRequest{
-		Issuer:    "test-issuer",
-		Subject:   "test-subject",
-		Audience:  "test-audience",
-		ExpiresAt: now.Add(-time.Hour), // Expired token
-		NotBefore: now.Add(-2 * time.Hour),
-		IssuedAt:  now.Add(-2 * time.Hour),
-	}
-
-	// Test expired opaque token
-	result, err := tm.CreateOpaqueToken(tokenReq)
-	if err != nil {
-		t.Fatalf("Failed to create opaque token: %v", err)
-	}
-
-	// Wait a bit to ensure token is expired
-	time.Sleep(10 * time.Millisecond)
-
-	_, err = tm.ValidateOpaqueToken(result.Token)
-	if err == nil {
-		t.Error("Expected error for expired opaque token")
-	}
-
-	if err != nil && err.Error() != "opaque token has expired" {
-		t.Errorf("Expected 'opaque token has expired' error, got: %v", err)
-	}
 }
 
 func TestTokenManagerInvalidToken(t *testing.T) {
 	config := &TokenManagerConfig{
-		JWTSecretKey:    []byte("test-secret"),
-		OpaqueSecretKey: []byte("opaque-secret"),
+		JWTSecretKey: []byte("test-secret"),
 	}
 
 	tm := NewTokenManager(config)
@@ -788,24 +397,11 @@ func TestTokenManagerInvalidToken(t *testing.T) {
 	if err == nil {
 		t.Error("Expected error for invalid JWT token")
 	}
-
-	// Test invalid opaque token
-	_, err = tm.ValidateOpaqueToken("invalid-opaque-token")
-	if err == nil {
-		t.Error("Expected error for invalid opaque token")
-	}
-
-	// Test invalid base64 opaque token
-	_, err = tm.ValidateOpaqueToken("invalid-base64!")
-	if err == nil {
-		t.Error("Expected error for invalid base64 opaque token")
-	}
 }
 
 func TestTokenManagerDefaultExpiration(t *testing.T) {
 	config := &TokenManagerConfig{
 		JWTSecretKey:      []byte("test-secret"),
-		OpaqueSecretKey:   []byte("opaque-secret"),
 		DefaultExpiration: 1 * time.Hour,
 	}
 
@@ -831,28 +427,14 @@ func TestTokenManagerDefaultExpiration(t *testing.T) {
 		jwtResult.ExpiresAt.After(expectedExpiration.Add(time.Minute)) {
 		t.Errorf("Expected expiration around %v, got %v", expectedExpiration, jwtResult.ExpiresAt)
 	}
-
-	// Test opaque token with default expiration
-	opaqueResult, err := tm.CreateOpaqueToken(tokenReq)
-	if err != nil {
-		t.Fatalf("Failed to create opaque token: %v", err)
-	}
-
-	// Check that expiration was set
-	if opaqueResult.ExpiresAt.Before(expectedExpiration.Add(-time.Minute)) ||
-		opaqueResult.ExpiresAt.After(expectedExpiration.Add(time.Minute)) {
-		t.Errorf("Expected expiration around %v, got %v", expectedExpiration, opaqueResult.ExpiresAt)
-	}
 }
 
 func TestTokenManagerBuilder(t *testing.T) {
 	// Test basic builder functionality
 	tm := NewTokenManagerBuilder().
 		WithJWTSecret([]byte("jwt-secret")).
-		WithOpaqueSecret([]byte("opaque-secret")).
 		WithJWTMethod(SigningMethodHS256).
 		WithDefaultExpiration(2 * time.Hour).
-		WithOpaqueTokenLength(64).
 		Build()
 
 	if tm == nil {
@@ -864,10 +446,6 @@ func TestTokenManagerBuilder(t *testing.T) {
 		t.Errorf("Expected JWT secret 'jwt-secret', got '%s'", string(tm.config.JWTSecretKey))
 	}
 
-	if string(tm.config.OpaqueSecretKey) != "opaque-secret" {
-		t.Errorf("Expected opaque secret 'opaque-secret', got '%s'", string(tm.config.OpaqueSecretKey))
-	}
-
 	if tm.config.JWTMethod != SigningMethodHS256 {
 		t.Errorf("Expected JWT method %s, got %s", SigningMethodHS256, tm.config.JWTMethod)
 	}
@@ -876,9 +454,6 @@ func TestTokenManagerBuilder(t *testing.T) {
 		t.Errorf("Expected default expiration 2h, got %v", tm.config.DefaultExpiration)
 	}
 
-	if tm.config.OpaqueTokenLength != 64 {
-		t.Errorf("Expected opaque token length 64, got %d", tm.config.OpaqueTokenLength)
-	}
 }
 
 func TestTokenManagerBuilderWithKeyPairs(t *testing.T) {
@@ -888,33 +463,18 @@ func TestTokenManagerBuilderWithKeyPairs(t *testing.T) {
 		t.Fatalf("Failed to generate RSA key pair: %v", err)
 	}
 
-	ecdsaKeyPair, err := GenerateECDSAKeyPair(elliptic.P256())
-	if err != nil {
-		t.Fatalf("Failed to generate ECDSA key pair: %v", err)
-	}
-
 	// Test builder with key pairs
 	tm := NewTokenManagerBuilder().
 		WithJWTSecret([]byte("jwt-secret")).
-		WithOpaqueSecret([]byte("opaque-secret")).
 		WithJWTKeyPair(rsaKeyPair).
-		WithOpaqueKeyPair(ecdsaKeyPair).
 		Build()
 
 	if tm.config.JWTKeyPair == nil {
 		t.Error("Expected JWT key pair to be set")
 	}
 
-	if tm.config.OpaqueKeyPair == nil {
-		t.Error("Expected opaque key pair to be set")
-	}
-
 	if tm.config.JWTKeyPair.Method != rsaKeyPair.Method {
 		t.Errorf("Expected JWT key pair method %s, got %s", rsaKeyPair.Method, tm.config.JWTKeyPair.Method)
-	}
-
-	if tm.config.OpaqueKeyPair.Method != ecdsaKeyPair.Method {
-		t.Errorf("Expected opaque key pair method %s, got %s", ecdsaKeyPair.Method, tm.config.OpaqueKeyPair.Method)
 	}
 }
 
@@ -922,7 +482,6 @@ func TestTokenBuilder(t *testing.T) {
 	// Create TokenManager using builder
 	tm := NewTokenManagerBuilder().
 		WithJWTSecret([]byte("jwt-secret")).
-		WithOpaqueSecret([]byte("opaque-secret")).
 		Build()
 
 	now := time.Now()
@@ -979,7 +538,6 @@ func TestTokenBuilder(t *testing.T) {
 func TestTokenBuilderWithClaims(t *testing.T) {
 	tm := NewTokenManagerBuilder().
 		WithJWTSecret([]byte("jwt-secret")).
-		WithOpaqueSecret([]byte("opaque-secret")).
 		Build()
 
 	claims := map[string]interface{}{
@@ -1048,40 +606,6 @@ func TestTokenBuilderWithClaims(t *testing.T) {
 	}
 }
 
-func TestTokenBuilderWithOpaqueTokens(t *testing.T) {
-	tm := NewTokenManagerBuilder().
-		WithJWTSecret([]byte("jwt-secret")).
-		WithOpaqueSecret([]byte("opaque-secret")).
-		Build()
-
-	// Test opaque token creation with builder
-	result, err := tm.NewToken().
-		WithIssuer("test-issuer").
-		WithSubject("test-subject").
-		WithAudience("test-audience").
-		WithExpirationDuration(time.Hour).
-		WithClaim("role", "admin").
-		CreateOpaqueWithHMAC(SigningMethodHS256)
-
-	if err != nil {
-		t.Fatalf("Failed to create opaque token with builder: %v", err)
-	}
-
-	// Validate the token
-	validatedReq, err := tm.ValidateOpaqueToken(result.Token)
-	if err != nil {
-		t.Fatalf("Failed to validate opaque token: %v", err)
-	}
-
-	if validatedReq.Issuer != "test-issuer" {
-		t.Errorf("Expected issuer 'test-issuer', got '%s'", validatedReq.Issuer)
-	}
-
-	if validatedReq.CustomClaims["role"] != "admin" {
-		t.Errorf("Expected role 'admin', got '%v'", validatedReq.CustomClaims["role"])
-	}
-}
-
 func TestTokenBuilderWithKeyPairs(t *testing.T) {
 	// Generate test key pair
 	keyPair, err := GenerateRSAKeyPair(2048)
@@ -1091,7 +615,6 @@ func TestTokenBuilderWithKeyPairs(t *testing.T) {
 
 	tm := NewTokenManagerBuilder().
 		WithJWTSecret([]byte("jwt-secret")).
-		WithOpaqueSecret([]byte("opaque-secret")).
 		Build()
 
 	// Test JWT with key pair
@@ -1110,29 +633,11 @@ func TestTokenBuilderWithKeyPairs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to validate JWT with key pair: %v", err)
 	}
-
-	// Test opaque token with key pair
-	opaqueResult, err := tm.NewToken().
-		WithIssuer("test-issuer").
-		WithSubject("test-subject").
-		WithClaim("role", "admin").
-		CreateOpaqueWithKeyPair(*keyPair)
-
-	if err != nil {
-		t.Fatalf("Failed to create opaque token with key pair: %v", err)
-	}
-
-	// Validate opaque token with key pair using TokenBuilder
-	_, err = tm.ValidateOpaqueWithKeyPair(opaqueResult.Token, *keyPair)
-	if err != nil {
-		t.Fatalf("Failed to validate opaque token with key pair: %v", err)
-	}
 }
 
 func TestTokenBuilderEdgeCases(t *testing.T) {
 	tm := NewTokenManagerBuilder().
 		WithJWTSecret([]byte("jwt-secret")).
-		WithOpaqueSecret([]byte("opaque-secret")).
 		Build()
 
 	// Test empty token builder
@@ -1180,7 +685,6 @@ func TestTokenBuilderEdgeCases(t *testing.T) {
 func TestTokenBuilderTimeHandling(t *testing.T) {
 	tm := NewTokenManagerBuilder().
 		WithJWTSecret([]byte("jwt-secret")).
-		WithOpaqueSecret([]byte("opaque-secret")).
 		Build()
 
 	now := time.Now()
@@ -1236,7 +740,6 @@ func TestTokenBuilderTimeHandling(t *testing.T) {
 func TestTokenBuilderComplexClaims(t *testing.T) {
 	tm := NewTokenManagerBuilder().
 		WithJWTSecret([]byte("jwt-secret")).
-		WithOpaqueSecret([]byte("opaque-secret")).
 		Build()
 
 	// Test complex nested claims
@@ -1338,7 +841,6 @@ func TestTokenBuilderAllSigningMethods(t *testing.T) {
 
 	tm := NewTokenManagerBuilder().
 		WithJWTSecret([]byte("jwt-secret")).
-		WithOpaqueSecret([]byte("opaque-secret")).
 		Build()
 
 	// Test HMAC JWT
@@ -1405,75 +907,11 @@ func TestTokenBuilderAllSigningMethods(t *testing.T) {
 		t.Fatalf("Failed to validate EdDSA JWT: %v", err)
 	}
 
-	// Test HMAC Opaque
-	hmacOpaqueResult, err := tm.NewToken().
-		WithIssuer("test-issuer").
-		WithSubject("test-subject").
-		WithClaim("method", "HMAC").
-		CreateOpaqueWithHMAC(SigningMethodHS256)
-
-	if err != nil {
-		t.Fatalf("Failed to create HMAC opaque token: %v", err)
-	}
-
-	_, err = tm.ValidateOpaqueWithHMAC(hmacOpaqueResult.Token, SigningMethodHS256)
-	if err != nil {
-		t.Fatalf("Failed to validate HMAC opaque token: %v", err)
-	}
-
-	// Test RSA Opaque
-	rsaOpaqueResult, err := tm.NewToken().
-		WithIssuer("test-issuer").
-		WithSubject("test-subject").
-		WithClaim("method", "RSA").
-		CreateOpaqueWithKeyPair(*rsaKeyPair)
-
-	if err != nil {
-		t.Fatalf("Failed to create RSA opaque token: %v", err)
-	}
-
-	_, err = tm.ValidateOpaqueWithKeyPair(rsaOpaqueResult.Token, *rsaKeyPair)
-	if err != nil {
-		t.Fatalf("Failed to validate RSA opaque token: %v", err)
-	}
-
-	// Test ECDSA Opaque
-	ecdsaOpaqueResult, err := tm.NewToken().
-		WithIssuer("test-issuer").
-		WithSubject("test-subject").
-		WithClaim("method", "ECDSA").
-		CreateOpaqueWithKeyPair(*ecdsaKeyPair)
-
-	if err != nil {
-		t.Fatalf("Failed to create ECDSA opaque token: %v", err)
-	}
-
-	_, err = tm.ValidateOpaqueWithKeyPair(ecdsaOpaqueResult.Token, *ecdsaKeyPair)
-	if err != nil {
-		t.Fatalf("Failed to validate ECDSA opaque token: %v", err)
-	}
-
-	// Test EdDSA Opaque
-	eddsaOpaqueResult, err := tm.NewToken().
-		WithIssuer("test-issuer").
-		WithSubject("test-subject").
-		WithClaim("method", "EdDSA").
-		CreateOpaqueWithKeyPair(*eddsaKeyPair)
-
-	if err != nil {
-		t.Fatalf("Failed to create EdDSA opaque token: %v", err)
-	}
-
-	_, err = tm.ValidateOpaqueWithKeyPair(eddsaOpaqueResult.Token, *eddsaKeyPair)
-	if err != nil {
-		t.Fatalf("Failed to validate EdDSA opaque token: %v", err)
-	}
 }
 
 func TestTokenBuilderErrorHandling(t *testing.T) {
 	tm := NewTokenManagerBuilder().
 		WithJWTSecret([]byte("jwt-secret")).
-		WithOpaqueSecret([]byte("opaque-secret")).
 		Build()
 
 	// Test with invalid key pair
@@ -1506,7 +944,6 @@ func TestTokenBuilderErrorHandling(t *testing.T) {
 func TestTokenBuilderPerformance(t *testing.T) {
 	tm := NewTokenManagerBuilder().
 		WithJWTSecret([]byte("jwt-secret")).
-		WithOpaqueSecret([]byte("opaque-secret")).
 		Build()
 
 	// Test performance with many claims
@@ -1555,10 +992,6 @@ func TestTokenManagerBuilderEdgeCases(t *testing.T) {
 		t.Errorf("Expected default expiration 24h, got %v", minimalTM.config.DefaultExpiration)
 	}
 
-	if minimalTM.config.OpaqueTokenLength != 32 {
-		t.Errorf("Expected default opaque token length 32, got %d", minimalTM.config.OpaqueTokenLength)
-	}
-
 	if minimalTM.config.JWTMethod != SigningMethodHS256 {
 		t.Errorf("Expected default JWT method %s, got %s", SigningMethodHS256, minimalTM.config.JWTMethod)
 	}
@@ -1566,10 +999,8 @@ func TestTokenManagerBuilderEdgeCases(t *testing.T) {
 	// Test builder with all options
 	fullTM := NewTokenManagerBuilder().
 		WithJWTSecret([]byte("jwt-secret")).
-		WithOpaqueSecret([]byte("opaque-secret")).
 		WithJWTMethod(SigningMethodHS512).
 		WithDefaultExpiration(48 * time.Hour).
-		WithOpaqueTokenLength(128).
 		Build()
 
 	if fullTM == nil {
@@ -1581,10 +1012,6 @@ func TestTokenManagerBuilderEdgeCases(t *testing.T) {
 		t.Errorf("Expected JWT secret 'jwt-secret', got '%s'", string(fullTM.config.JWTSecretKey))
 	}
 
-	if string(fullTM.config.OpaqueSecretKey) != "opaque-secret" {
-		t.Errorf("Expected opaque secret 'opaque-secret', got '%s'", string(fullTM.config.OpaqueSecretKey))
-	}
-
 	if fullTM.config.JWTMethod != SigningMethodHS512 {
 		t.Errorf("Expected JWT method %s, got %s", SigningMethodHS512, fullTM.config.JWTMethod)
 	}
@@ -1593,15 +1020,11 @@ func TestTokenManagerBuilderEdgeCases(t *testing.T) {
 		t.Errorf("Expected default expiration 48h, got %v", fullTM.config.DefaultExpiration)
 	}
 
-	if fullTM.config.OpaqueTokenLength != 128 {
-		t.Errorf("Expected opaque token length 128, got %d", fullTM.config.OpaqueTokenLength)
-	}
 }
 
 func TestTokenBuilderChaining(t *testing.T) {
 	tm := NewTokenManagerBuilder().
 		WithJWTSecret([]byte("jwt-secret")).
-		WithOpaqueSecret([]byte("opaque-secret")).
 		Build()
 
 	// Test method chaining with all methods
@@ -1659,7 +1082,6 @@ func TestTokenBuilderChaining(t *testing.T) {
 func TestTokenBuilderReuse(t *testing.T) {
 	tm := NewTokenManagerBuilder().
 		WithJWTSecret([]byte("jwt-secret")).
-		WithOpaqueSecret([]byte("opaque-secret")).
 		Build()
 
 	// Test reusing the same builder instance
@@ -1702,7 +1124,6 @@ func TestTokenBuilderReuse(t *testing.T) {
 func TestTokenBuilderConcurrency(t *testing.T) {
 	tm := NewTokenManagerBuilder().
 		WithJWTSecret([]byte("jwt-secret")).
-		WithOpaqueSecret([]byte("opaque-secret")).
 		Build()
 
 	// Test concurrent token creation
@@ -1733,87 +1154,5 @@ func TestTokenBuilderConcurrency(t *testing.T) {
 		if err := <-results; err != nil {
 			t.Fatalf("Concurrent token creation failed: %v", err)
 		}
-	}
-}
-
-func TestOpaqueMethodConfiguration(t *testing.T) {
-	// Test different opaque methods
-	methods := []SigningMethod{
-		SigningMethodHS256,
-		SigningMethodHS384,
-		SigningMethodHS512,
-	}
-
-	for _, method := range methods {
-		t.Run(string(method), func(t *testing.T) {
-			// Create TokenManager with specific opaque method
-			tm := NewTokenManager(&TokenManagerConfig{
-				OpaqueSecretKey:   []byte("test-opaque-secret"),
-				OpaqueMethod:      method,
-				DefaultExpiration: time.Hour,
-			})
-
-			// Create opaque token
-			req := TokenRequest{
-				Issuer:    "test-issuer",
-				Subject:   "test-subject",
-				ExpiresAt: time.Now().Add(time.Hour),
-				IssuedAt:  time.Now(),
-			}
-
-			result, err := tm.CreateOpaqueToken(req)
-			if err != nil {
-				t.Fatalf("Failed to create opaque token: %v", err)
-			}
-
-			// Validate the token
-			validatedReq, err := tm.ValidateOpaqueToken(result.Token)
-			if err != nil {
-				t.Fatalf("Failed to validate opaque token: %v", err)
-			}
-
-			// Verify the token data
-			if validatedReq.Issuer != req.Issuer {
-				t.Errorf("Expected issuer %s, got %s", req.Issuer, validatedReq.Issuer)
-			}
-			if validatedReq.Subject != req.Subject {
-				t.Errorf("Expected subject %s, got %s", req.Subject, validatedReq.Subject)
-			}
-		})
-	}
-}
-
-func TestOpaqueMethodWithBuilder(t *testing.T) {
-	// Test OpaqueMethod with TokenManagerBuilder
-	tm := NewTokenManagerBuilder().
-		WithOpaqueSecret([]byte("builder-opaque-secret")).
-		Build()
-
-	// Create opaque token using TokenBuilder with specific method
-	result, err := tm.NewToken().
-		WithIssuer("builder-issuer").
-		WithSubject("builder-subject").
-		WithClaim("test", "value").
-		CreateOpaqueWithHMAC(SigningMethodHS512)
-
-	if err != nil {
-		t.Fatalf("Failed to create opaque token with builder: %v", err)
-	}
-
-	// Validate the token
-	validatedReq, err := tm.ValidateOpaqueWithHMAC(result.Token, SigningMethodHS512)
-	if err != nil {
-		t.Fatalf("Failed to validate opaque token: %v", err)
-	}
-
-	// Verify the token data
-	if validatedReq.Issuer != "builder-issuer" {
-		t.Errorf("Expected issuer builder-issuer, got %s", validatedReq.Issuer)
-	}
-	if validatedReq.Subject != "builder-subject" {
-		t.Errorf("Expected subject builder-subject, got %s", validatedReq.Subject)
-	}
-	if validatedReq.CustomClaims["test"] != "value" {
-		t.Errorf("Expected custom claim test=value, got %v", validatedReq.CustomClaims["test"])
 	}
 }

@@ -170,7 +170,6 @@ func main() {
 	// Create a TokenManager that uses the KeyManager
 	tmConfig := &tokeno.TokenManagerConfig{
 		JWTSecretKey:      []byte("fallback-secret"),
-		OpaqueSecretKey:   []byte("fallback-opaque-secret"),
 		DefaultExpiration: 1 * time.Hour,
 	}
 
@@ -197,16 +196,6 @@ func main() {
 		fmt.Printf("Created JWT token: %s...\n", jwtResult.Token[:50])
 		fmt.Printf("Token type: %s\n", jwtResult.Type)
 		fmt.Printf("Expires at: %s\n", jwtResult.ExpiresAt.Format(time.RFC3339))
-	}
-
-	// Create opaque token
-	opaqueResult, err := tm.CreateOpaqueToken(tokenReq)
-	if err != nil {
-		log.Printf("Failed to create opaque token: %v", err)
-	} else {
-		fmt.Printf("Created opaque token: %s...\n", opaqueResult.Token[:50])
-		fmt.Printf("Token type: %s\n", opaqueResult.Type)
-		fmt.Printf("Expires at: %s\n", opaqueResult.ExpiresAt.Format(time.RFC3339))
 	}
 
 	fmt.Println("\n=== Key Rotation Example Complete ===")

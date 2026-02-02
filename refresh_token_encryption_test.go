@@ -22,8 +22,6 @@ func TestRefreshTokenEncryption(t *testing.T) {
 	}
 
 	tm := NewTokenManagerBuilder().
-		WithOpaqueSecret([]byte("test-secret")).
-		WithOpaqueEncryption(encryptionKey, true).
 		WithRefreshConfig(refreshConfig).
 		WithDefaultExpiration(1 * time.Hour).
 		Build()
@@ -38,7 +36,7 @@ func TestRefreshTokenEncryption(t *testing.T) {
 		WithClaim("user_id", "12345").
 		WithClaim("role", "admin")
 
-	result, err := tokenBuilder.CreateOpaqueWithHMAC(SigningMethodHS256)
+	result, err := tokenBuilder.CreateJWTWithHMAC(SigningMethodHS256)
 	if err != nil {
 		t.Fatalf("Failed to create opaque token: %v", err)
 	}
@@ -119,7 +117,7 @@ func TestRefreshTokenEncryption(t *testing.T) {
 		}
 
 		// Validate the new access token
-		validatedReq, err := tm.ValidateOpaqueToken(newResult.Token)
+		validatedReq, err := tm.ValidateJWTToken(newResult.Token)
 		if err != nil {
 			t.Fatalf("Failed to validate refreshed token: %v", err)
 		}
@@ -164,8 +162,7 @@ func TestRefreshTokenWithoutEncryption(t *testing.T) {
 	}
 
 	tm := NewTokenManagerBuilder().
-		WithOpaqueSecret([]byte("test-secret")).
-		WithOpaqueEncryption([]byte("dummy-key"), false). // Disable encryption
+		WithJWTSecret([]byte("test-secret")).
 		WithRefreshConfig(refreshConfig).
 		WithDefaultExpiration(1 * time.Hour).
 		Build()
@@ -180,7 +177,7 @@ func TestRefreshTokenWithoutEncryption(t *testing.T) {
 		WithClaim("user_id", "12345").
 		WithClaim("role", "admin")
 
-	result, err := tokenBuilder.CreateOpaqueWithHMAC(SigningMethodHS256)
+	result, err := tokenBuilder.CreateJWTWithHMAC(SigningMethodHS256)
 	if err != nil {
 		t.Fatalf("Failed to create opaque token: %v", err)
 	}

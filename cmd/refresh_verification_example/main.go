@@ -91,13 +91,6 @@ func main() {
 		}
 		fmt.Printf("✅ JWT Validation Successful\n")
 		fmt.Printf("✅ Token Type: %s\n", detectedClaims.CustomClaims["token_type"])
-	case tokeno.TokenTypeOpaque:
-		detectedClaims, err := tm.ValidateOpaqueWithHMAC(tokenResult.RefreshToken, tokeno.SigningMethodHS256)
-		if err != nil {
-			log.Fatalf("Failed to validate Opaque refresh token: %v", err)
-		}
-		fmt.Printf("✅ Opaque Validation Successful\n")
-		fmt.Printf("✅ Token Type: %s\n", detectedClaims.CustomClaims["token_type"])
 	default:
 		fmt.Printf("❌ Unknown token type: %s\n", tokenType)
 	}
@@ -135,34 +128,6 @@ func main() {
 	} else {
 		fmt.Println("❌ Refresh token expired")
 	}
-
-	// Method 5: Test with Opaque Refresh Token
-	fmt.Println("\n6. Method 5: Opaque Refresh Token Verification:")
-	fmt.Println("===============================================")
-
-	// Create Opaque token with refresh
-	opaqueResult, err := tm.NewToken().
-		WithIssuer("test-service").
-		WithSubject("user456").
-		WithExpiration(time.Now().Add(1 * time.Hour)).
-		CreateOpaqueWithHMAC(tokeno.SigningMethodHS256)
-
-	if err != nil {
-		log.Fatalf("Failed to create opaque token: %v", err)
-	}
-
-	fmt.Printf("✅ Opaque Access Token: %s...\n", opaqueResult.Token[:30])
-	fmt.Printf("✅ Opaque Refresh Token: %s...\n", opaqueResult.RefreshToken[:30])
-
-	// Verify Opaque refresh token
-	opaqueRefreshClaims, err := tm.ValidateOpaqueWithHMAC(opaqueResult.RefreshToken, tokeno.SigningMethodHS256)
-	if err != nil {
-		log.Fatalf("Failed to validate opaque refresh token: %v", err)
-	}
-
-	fmt.Printf("✅ Opaque Refresh Token Valid: %t\n", err == nil)
-	fmt.Printf("✅ Token Type: %s\n", opaqueRefreshClaims.CustomClaims["token_type"])
-	fmt.Printf("✅ Attempts: %.0f\n", opaqueRefreshClaims.CustomClaims["attempts"])
 
 	// Method 6: Error Handling Examples
 	fmt.Println("\n7. Method 6: Error Handling Examples:")
@@ -236,8 +201,6 @@ func verifyRefreshToken(tm *tokeno.TokenManager, refreshToken string) (bool, *to
 	switch tokenType {
 	case tokeno.TokenTypeJWT:
 		claims, err = tm.ValidateJWTWithHMAC(refreshToken, tokeno.SigningMethodHS256)
-	case tokeno.TokenTypeOpaque:
-		claims, err = tm.ValidateOpaqueWithHMAC(refreshToken, tokeno.SigningMethodHS256)
 	default:
 		return false, nil, fmt.Errorf("unknown token type: %s", tokenType)
 	}

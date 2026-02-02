@@ -64,27 +64,27 @@ func main() {
 	fmt.Printf("✅ Attempts: %d\n", refreshInfo.Attempts)
 	fmt.Printf("✅ Created At: %s\n", refreshInfo.CreatedAt.Format(time.RFC3339))
 
-	// 3. Create Opaque Token with Auto-Generated Refresh Token
-	fmt.Println("\n3. Creating Opaque Token with Auto-Generated Refresh Token:")
-	fmt.Println("===========================================================")
+	// 3. Create JWT Token with Auto-Generated Refresh Token
+	fmt.Println("\n3. Creating JWT Token with Auto-Generated Refresh Token:")
+	fmt.Println("========================================================")
 
-	opaqueResult, err := tm.NewToken().
+	jwtResult2, err := tm.NewToken().
 		WithIssuer("tokeno-service").
 		WithSubject("user456").
 		WithAudience("api-clients").
 		WithExpiration(time.Now().Add(2*time.Hour)).
 		WithClaim("role", "user").
 		WithClaim("department", "engineering").
-		CreateOpaqueWithHMAC(tokeno.SigningMethodHS256)
+		CreateJWTWithHMAC(tokeno.SigningMethodHS256)
 
 	if err != nil {
-		log.Fatalf("Failed to create Opaque token: %v", err)
+		log.Fatalf("Failed to create JWT token: %v", err)
 	}
 
-	fmt.Printf("✅ Opaque Token: %s...\n", opaqueResult.Token[:50])
-	fmt.Printf("✅ Refresh Token: %s...\n", opaqueResult.RefreshToken[:20])
-	fmt.Printf("✅ Expires At: %s\n", opaqueResult.ExpiresAt.Format(time.RFC3339))
-	fmt.Printf("✅ Token Type: %s\n", opaqueResult.Type)
+	fmt.Printf("✅ JWT Token: %s...\n", jwtResult2.Token[:50])
+	fmt.Printf("✅ Refresh Token: %s...\n", jwtResult2.RefreshToken[:20])
+	fmt.Printf("✅ Expires At: %s\n", jwtResult2.ExpiresAt.Format(time.RFC3339))
+	fmt.Printf("✅ Token Type: %s\n", jwtResult2.Type)
 
 	// 4. Refresh JWT Token
 	fmt.Println("\n4. Refreshing JWT Token:")
@@ -102,36 +102,11 @@ func main() {
 	// Validate the refreshed token
 	validatedJWT, err := tm.ValidateJWTWithHMAC(refreshedJWT.Token, tokeno.SigningMethodHS256)
 	if err != nil {
-		log.Fatalf("Failed to validate refreshed JWT: %v", err)
-	}
-
-	fmt.Printf("✅ Validated Subject: %s\n", validatedJWT.Subject)
-	fmt.Printf("✅ Validated Role: %s\n", validatedJWT.CustomClaims["role"])
-	if refreshed, ok := validatedJWT.CustomClaims["refreshed"]; ok {
-		fmt.Printf("✅ Refreshed Claim: %t\n", refreshed)
-	}
-
-	// 5. Refresh Opaque Token
-	fmt.Println("\n5. Refreshing Opaque Token:")
-	fmt.Println("===========================")
-
-	refreshedOpaque, err := tm.RefreshToken(opaqueResult.RefreshToken)
-	if err != nil {
-		log.Fatalf("Failed to refresh Opaque token: %v", err)
-	}
-
-	fmt.Printf("✅ New Opaque Token: %s...\n", refreshedOpaque.Token[:50])
-	fmt.Printf("✅ New Refresh Token: %s...\n", refreshedOpaque.RefreshToken[:20])
-	fmt.Printf("✅ New Expires At: %s\n", refreshedOpaque.ExpiresAt.Format(time.RFC3339))
-
-	// Validate the refreshed opaque token
-	validatedOpaque, err := tm.ValidateOpaqueWithHMAC(refreshedOpaque.Token, tokeno.SigningMethodHS256)
-	if err != nil {
 		log.Fatalf("Failed to validate refreshed Opaque: %v", err)
 	}
 
-	fmt.Printf("✅ Validated Subject: %s\n", validatedOpaque.Subject)
-	fmt.Printf("✅ Validated Department: %s\n", validatedOpaque.CustomClaims["department"])
+	fmt.Printf("✅ Validated Subject: %s\n", validatedJWT.Subject)
+	fmt.Printf("✅ Validated Department: %s\n", validatedJWT.CustomClaims["department"])
 
 	// 6. Demonstrate Token Revocation
 	fmt.Println("\n6. Token Revocation:")
@@ -233,7 +208,7 @@ func main() {
 
 	fmt.Println("\n=== Refresh Token V2 Example Complete ===")
 	fmt.Println("Key Features Demonstrated:")
-	fmt.Println("• Auto-generated refresh tokens for both JWT and Opaque tokens")
+	fmt.Println("• Auto-generated refresh tokens for JWT tokens")
 	fmt.Println("• Refresh tokens linked to specific access tokens")
 	fmt.Println("• Automatic refresh token generation on token creation")
 	fmt.Println("• Token refresh with new access and refresh tokens")

@@ -92,17 +92,17 @@ func TestRefreshTokenVerification(t *testing.T) {
 
 	// Test 4: Opaque Refresh Token Verification
 	t.Run("Opaque Refresh Token Verification", func(t *testing.T) {
-		opaqueResult, err := tm.NewToken().
+		jwtResult, err := tm.NewToken().
 			WithIssuer("test-issuer").
 			WithSubject("user456").
 			WithExpiration(time.Now().Add(1 * time.Hour)).
-			CreateOpaqueWithHMAC(SigningMethodHS256)
+			CreateJWTWithHMAC(SigningMethodHS256)
 
 		if err != nil {
-			t.Fatalf("Failed to create opaque token: %v", err)
+			t.Fatalf("Failed to create JWT token: %v", err)
 		}
 
-		claims, err := tm.ValidateOpaqueWithHMAC(opaqueResult.RefreshToken, SigningMethodHS256)
+		claims, err := tm.ValidateJWTWithHMAC(jwtResult.RefreshToken, SigningMethodHS256)
 		if err != nil {
 			t.Fatalf("Failed to validate opaque refresh token: %v", err)
 		}
@@ -243,8 +243,6 @@ func verifyRefreshToken(tm *TokenManager, refreshToken string) (bool, *TokenRequ
 	switch tokenType {
 	case TokenTypeJWT:
 		claims, err = tm.ValidateJWTWithHMAC(refreshToken, SigningMethodHS256)
-	case TokenTypeOpaque:
-		claims, err = tm.ValidateOpaqueWithHMAC(refreshToken, SigningMethodHS256)
 	default:
 		return false, nil, fmt.Errorf("unknown token type: %s", tokenType)
 	}

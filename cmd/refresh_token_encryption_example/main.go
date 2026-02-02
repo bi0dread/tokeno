@@ -30,8 +30,7 @@ func main() {
 
 	// Create TokenManager with encryption enabled
 	tm := tokeno.NewTokenManagerBuilder().
-		WithOpaqueSecret([]byte("my-secret-key")).
-		WithOpaqueEncryption(encryptionKey, true).
+		WithJWTSecret([]byte("my-secret-key")).
 		WithRefreshConfig(refreshConfig).
 		WithDefaultExpiration(1 * time.Hour).
 		Build()
@@ -180,8 +179,7 @@ func main() {
 
 	// Create a non-encrypted token manager for comparison
 	tmNonEncrypted := tokeno.NewTokenManagerBuilder().
-		WithOpaqueSecret([]byte("my-secret-key")).
-		WithOpaqueEncryption(encryptionKey, false). // Disable encryption
+		WithJWTSecret([]byte("my-secret-key")).
 		WithRefreshConfig(refreshConfig).
 		WithDefaultExpiration(1 * time.Hour).
 		Build()

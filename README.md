@@ -4,7 +4,7 @@
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Go Report Card](https://goreportcard.com/badge/github.com/bi0dread/tokeno)](https://goreportcard.com/report/github.com/bi0dread/tokeno)
 
-A comprehensive Go package for creating and validating both JWT and opaque tokens with support for multiple signing algorithms, automatic key rotation, and enterprise-grade security features.
+A comprehensive Go package for creating and validating JWT tokens with support for multiple signing algorithms, automatic key rotation, and enterprise-grade security features.
 
 ## 📋 Table of Contents
 
@@ -15,7 +15,6 @@ A comprehensive Go package for creating and validating both JWT and opaque token
   - [Basic TokenManager](#basic-tokenmanager)
   - [JWT Tokens with HMAC](#-jwt-tokens-with-hmac)
   - [JWT Tokens with RSA Key Pairs](#-jwt-tokens-with-rsa-key-pairs)
-  - [Opaque Tokens](#-opaque-tokens)
   - [Key Rotation](#-key-rotation)
   - [Builder Pattern](#️-builder-pattern)
   - [Refresh Tokens](#-refresh-tokens)
@@ -42,7 +41,6 @@ func main() {
     // Create TokenManager with refresh tokens
     tm := tokeno.NewTokenManagerBuilder().
         WithJWTSecret([]byte("your-secret-key")).
-        WithOpaqueSecret([]byte("your-opaque-secret")).
         WithDefaultExpiration(24 * time.Hour).
         WithRefreshConfig(&tokeno.TokenRefreshConfig{
             MaxRefreshAttempts: 5,
@@ -86,10 +84,8 @@ func main() {
 
 ### 🔑 Token Support
 - **JWT Tokens**: Full RFC 7519 compliance with standard claims
-- **Opaque Tokens**: Custom JSON-based tokens with cryptographic signatures
 - **Refresh Tokens**: Automatic refresh token generation with security controls
 - **Auto-Detection**: Automatic token type detection and validation
-- **Dual Management**: Single API for both token types
 
 ### 🔐 Security & Signing
 - **Multiple Algorithms**: HMAC (HS256/384/512), RSA (RS256/384/512), ECDSA (ES256/384/512), EdDSA
@@ -126,7 +122,6 @@ import "github.com/bi0dread/tokeno"
 // Create TokenManager with configuration
 tm := tokeno.NewTokenManagerBuilder().
     WithJWTSecret([]byte("your-jwt-secret")).
-    WithOpaqueSecret([]byte("your-opaque-secret")).
     WithDefaultExpiration(24 * time.Hour).
     Build()
 
@@ -175,20 +170,6 @@ jwtResult, err := tm.NewToken().
 validated, err := tm.ValidateJWTWithKeyPair(jwtResult.Token, *keyPair)
 ```
 
-### 🎫 Opaque Tokens
-
-```go
-// Create opaque token
-opaqueResult, err := tm.NewToken().
-    WithIssuer("my-service").
-    WithSubject("user123").
-    WithClaim("session_id", "sess_12345").
-    CreateOpaqueWithHMAC(tokeno.SigningMethodHS256)
-
-// Validate opaque token
-validated, err := tm.ValidateOpaqueWithHMAC(opaqueResult.Token, tokeno.SigningMethodHS256)
-```
-
 ### 🔄 Key Rotation
 
 ```go
@@ -223,12 +204,9 @@ km.DecrementTokenCount(key.ID)
 // Create TokenManager using builder pattern
 tm := tokeno.NewTokenManagerBuilder().
     WithJWTSecret([]byte("jwt-secret")).
-    WithOpaqueSecret([]byte("opaque-secret")).
     WithJWTMethod(tokeno.SigningMethodHS512).
     WithJWTKeyPair(rsaKeyPair).
-    WithOpaqueKeyPair(ecdsaKeyPair).
     WithDefaultExpiration(12 * time.Hour).
-    WithOpaqueTokenLength(64).
     WithRefreshConfig(&tokeno.TokenRefreshConfig{
         RefreshThreshold:   30 * time.Minute,
         MaxRefreshAttempts: 5,
@@ -400,7 +378,6 @@ func main() {
     // Create TokenManager configuration
     config := &tokeno.TokenManagerConfig{
         JWTSecretKey:      []byte("your-jwt-secret-key-here"),
-        OpaqueSecretKey:   []byte("your-opaque-secret-key-here"),
         DefaultExpiration: 24 * time.Hour,
     }
     
@@ -428,19 +405,10 @@ func main() {
     }
     fmt.Println("JWT Token:", jwtResult.Token)
     
-    // Create opaque token
-    opaqueResult, err := tm.CreateOpaqueToken(tokenReq)
-    if err != nil {
-        panic(err)
-    }
-    fmt.Println("Opaque Token:", opaqueResult.Token)
-    
-    // Auto-validate both tokens
+    // Auto-validate token
     validatedJWT, _ := tm.ValidateToken(jwtResult.Token)
-    validatedOpaque, _ := tm.ValidateToken(opaqueResult.Token)
     
     fmt.Printf("JWT Issuer: %s\n", validatedJWT.Issuer)
-    fmt.Printf("Opaque Issuer: %s\n", validatedOpaque.Issuer)
 }
 ```
 
@@ -452,12 +420,9 @@ The TokenManager supports a fluent builder pattern for easy configuration:
 // Create TokenManager using builder pattern
 tm := tokeno.NewTokenManagerBuilder().
     WithJWTSecret([]byte("jwt-secret")).
-    WithOpaqueSecret([]byte("opaque-secret")).
     WithJWTMethod(tokeno.SigningMethodHS512).
     WithJWTKeyPair(rsaKeyPair).
-    WithOpaqueKeyPair(ecdsaKeyPair).
     WithDefaultExpiration(12 * time.Hour).
-    WithOpaqueTokenLength(64).
     Build()
 ```
 
@@ -476,15 +441,6 @@ jwtResult, err := tm.NewToken().
     WithClaim("permissions", []string{"read", "write"}).
     CreateJWTWithHMAC(tokeno.SigningMethodHS256)
 
-// Create opaque token with method chaining
-opaqueResult, err := tm.NewToken().
-    WithIssuer("my-service").
-    WithSubject("user123").
-    WithAudience("api-clients").
-    WithExpirationDuration(24 * time.Hour).
-    WithClaim("role", "admin").
-    WithClaim("features", []string{"analytics", "reporting"}).
-    CreateOpaqueWithHMAC(tokeno.SigningMethodHS256)
 ```
 
 ### TokenBuilder for Explicit Control
@@ -503,16 +459,6 @@ jwtResult, err := tm.NewToken().
 
 // Validate JWT token with explicit HMAC using TokenManager
 validatedJWT, err := tm.ValidateJWTWithHMAC(jwtResult.Token, tokeno.SigningMethodHS256)
-
-// Create opaque token with explicit HMAC using TokenBuilder
-opaqueResult, err := tm.NewToken().
-	WithIssuer("issuer").
-	WithSubject("subject").
-	WithClaims(claims).
-	CreateOpaqueWithHMAC(tokeno.SigningMethodHS256)
-
-// Validate opaque token with explicit HMAC using TokenManager
-validatedOpaque, err := tm.ValidateOpaqueWithHMAC(opaqueResult.Token, tokeno.SigningMethodHS256)
 ```
 
 #### Key Pair Functions using TokenBuilder
@@ -530,135 +476,7 @@ jwtResult, err := tm.NewToken().
 
 // Validate JWT token with explicit key pair using TokenManager
 validatedJWT, err := tm.ValidateJWTWithKeyPair(jwtResult.Token, *keyPair)
-
-// Create opaque token with explicit key pair using TokenBuilder
-opaqueResult, err := tm.NewToken().
-	WithIssuer("issuer").
-	WithSubject("subject").
-	WithClaims(claims).
-	CreateOpaqueWithKeyPair(*keyPair)
-
-// Validate opaque token with explicit key pair using TokenManager
-validatedOpaque, err := tm.ValidateOpaqueWithKeyPair(opaqueResult.Token, *keyPair)
 ```
-
-### Opaque Token with Key Pairs
-
-```go
-package main
-
-import (
-    "fmt"
-    "time"
-    "github.com/bi0dread/tokeno"
-)
-
-func main() {
-    // Generate RSA key pair for opaque tokens
-    keyPair, err := tokeno.GenerateRSAKeyPair(2048)
-    if err != nil {
-        panic(err)
-    }
-    
-    // Create TokenManager with key pair for opaque tokens
-    config := &tokeno.TokenManagerConfig{
-        JWTSecretKey:      []byte("jwt-secret"),
-        OpaqueSecretKey:   []byte("opaque-secret"),
-        OpaqueKeyPair:     keyPair,  // Use key pair for opaque tokens
-        DefaultExpiration: 24 * time.Hour,
-    }
-    
-    tm := tokeno.NewTokenManager(config)
-    
-    now := time.Now()
-    tokenReq := tokeno.TokenRequest{
-        Issuer:    "my-service",
-        Subject:   "user123",
-        Audience:  "api-clients",
-        ExpiresAt: now.Add(24 * time.Hour),
-        NotBefore: now,
-        IssuedAt:  now,
-        CustomClaims: map[string]interface{}{
-            "role": "admin",
-        },
-    }
-    
-    // Create opaque token with RSA signature
-    opaqueResult, err := tm.CreateOpaqueToken(tokenReq)
-    if err != nil {
-        panic(err)
-    }
-    
-    fmt.Println("Opaque Token with RSA:", opaqueResult.Token)
-    
-    // Validate opaque token
-    validatedReq, err := tm.ValidateOpaqueToken(opaqueResult.Token)
-    if err != nil {
-        panic(err)
-    }
-    
-    fmt.Printf("Opaque Token is valid! (Issuer: %s)\n", validatedReq.Issuer)
-}
-```
-
-### Opaque Token with Different HMAC Methods
-
-```go
-package main
-
-import (
-    "fmt"
-    "time"
-    "github.com/bi0dread/tokeno"
-)
-
-func main() {
-    // Test different HMAC methods for opaque tokens
-    methods := []tokeno.SigningMethod{
-        tokeno.SigningMethodHS256,
-        tokeno.SigningMethodHS384,
-        tokeno.SigningMethodHS512,
-    }
-    
-    for _, method := range methods {
-        fmt.Printf("\n--- Testing %s ---\n", method)
-        
-        // Create TokenManager with specific opaque method
-        tm := tokeno.NewTokenManagerBuilder().
-            WithOpaqueSecret([]byte("method-specific-secret")).
-            WithOpaqueMethod(method).
-            Build()
-        
-        // Create opaque token
-        result, err := tm.NewToken().
-            WithIssuer("method-issuer").
-            WithSubject("method-user").
-            WithClaim("method", string(method)).
-            CreateOpaqueWithHMAC()
-        
-        if err != nil {
-            fmt.Printf("Failed to create opaque token with %s: %v\n", method, err)
-            continue
-        }
-        
-        fmt.Printf("Opaque Token (%s): %s\n", method, result.Token[:50]+"...")
-        
-        // Validate the token
-        validatedReq, err := tm.ValidateOpaqueWithHMAC(result.Token)
-        if err != nil {
-            fmt.Printf("Failed to validate opaque token with %s: %v\n", method, err)
-        } else {
-            fmt.Printf("Opaque token with %s is valid! (Method: %s)\n", 
-                method, validatedReq.CustomClaims["method"])
-        }
-    }
-}
-```
-
-**Supported Opaque Methods:**
-- `SigningMethodHS256` - HMAC-SHA256 (default)
-- `SigningMethodHS384` - HMAC-SHA384
-- `SigningMethodHS512` - HMAC-SHA512
 
 ### HMAC (Symmetric) Example
 
@@ -835,10 +653,7 @@ The `TokenManagerConfig` struct configures the TokenManager:
 ```go
 type TokenManagerConfig struct {
     JWTSecretKey      []byte                // Secret key for HMAC JWT tokens
-    OpaqueSecretKey   []byte                // Secret key for opaque token signatures
-    OpaqueTokenLength int                   // Length of opaque token signatures (default: 32)
     JWTKeyPair        *KeyPair              // Optional key pair for asymmetric JWT tokens
-    OpaqueKeyPair     *KeyPair              // Optional key pair for asymmetric opaque tokens
     DefaultExpiration time.Duration         // Default token expiration (default: 24h)
     RefreshConfig     *TokenRefreshConfig   // Optional refresh token configuration
 }
@@ -870,7 +685,7 @@ The `TokenResult` struct contains the result of token creation:
 type TokenResult struct {
     Token        string    `json:"token"`         // The generated access token string
     RefreshToken string    `json:"refresh_token"` // The generated refresh token string (if configured)
-    Type         TokenType `json:"type"`          // Token type (jwt or opaque)
+    Type         TokenType `json:"type"`          // Token type (jwt)
     ExpiresAt    time.Time `json:"expires_at"`    // Token expiration time
     IssuedAt     time.Time `json:"issued_at"`     // Token issued time
 }
@@ -882,8 +697,7 @@ type TokenResult struct {
 type TokenType string
 
 const (
-    TokenTypeJWT    TokenType = "jwt"    // JWT token
-    TokenTypeOpaque TokenType = "opaque" // Opaque token
+    TokenTypeJWT TokenType = "jwt" // JWT token
 )
 ```
 
@@ -965,12 +779,9 @@ Each key has metadata including:
 ##### Builder Pattern
 - `NewTokenManagerBuilder() *TokenManagerBuilder` - Creates a new TokenManagerBuilder
 - `TokenManagerBuilder.WithJWTSecret(secret []byte) *TokenManagerBuilder` - Sets JWT secret
-- `TokenManagerBuilder.WithOpaqueSecret(secret []byte) *TokenManagerBuilder` - Sets opaque secret
 - `TokenManagerBuilder.WithJWTMethod(method SigningMethod) *TokenManagerBuilder` - Sets JWT method
 - `TokenManagerBuilder.WithJWTKeyPair(keyPair *KeyPair) *TokenManagerBuilder` - Sets JWT key pair
-- `TokenManagerBuilder.WithOpaqueKeyPair(keyPair *KeyPair) *TokenManagerBuilder` - Sets opaque key pair
 - `TokenManagerBuilder.WithDefaultExpiration(duration time.Duration) *TokenManagerBuilder` - Sets default expiration
-- `TokenManagerBuilder.WithOpaqueTokenLength(length int) *TokenManagerBuilder` - Sets opaque token length
 - `TokenManagerBuilder.WithRefreshConfig(config *TokenRefreshConfig) *TokenManagerBuilder` - Sets refresh token configuration
 - `TokenManagerBuilder.Build() *TokenManager` - Builds the TokenManager
 
@@ -987,22 +798,16 @@ Each key has metadata including:
 - `TokenBuilder.WithClaims(claims map[string]interface{}) *TokenBuilder` - Adds multiple claims
 - `TokenBuilder.CreateJWTWithHMAC(method SigningMethod) (*TokenResult, error)` - Creates JWT token with HMAC
 - `TokenBuilder.CreateJWTWithKeyPair(keyPair KeyPair) (*TokenResult, error)` - Creates JWT token with key pair
-- `TokenBuilder.CreateOpaqueWithHMAC(method SigningMethod) (*TokenResult, error)` - Creates opaque token with HMAC
-- `TokenBuilder.CreateOpaqueWithKeyPair(keyPair KeyPair) (*TokenResult, error)` - Creates opaque token with key pair
 
 ##### General Methods (Auto-detect)
 - `CreateJWTToken(req TokenRequest) (*TokenResult, error)` - Creates a JWT token (auto-detects method)
-- `CreateOpaqueToken(req TokenRequest) (*TokenResult, error)` - Creates an opaque token (auto-detects method)
 - `ValidateJWTToken(token string) (*TokenRequest, error)` - Validates a JWT token (auto-detects method)
-- `ValidateOpaqueToken(token string) (*TokenRequest, error)` - Validates an opaque token (auto-detects method)
-- `ValidateToken(token string) (*TokenRequest, error)` - Auto-detects and validates any token type
+- `ValidateToken(token string) (*TokenRequest, error)` - Auto-detects and validates JWT token
 - `RefreshToken(refreshToken string) (*TokenResult, error)` - Refreshes an access token using a refresh token
 
 ##### TokenManager Validation Methods
 - `ValidateJWTWithHMAC(token string, method SigningMethod) (*TokenRequest, error)` - Validates a JWT token with HMAC
-- `ValidateOpaqueWithHMAC(token string, method SigningMethod) (*TokenRequest, error)` - Validates an opaque token with HMAC
 - `ValidateJWTWithKeyPair(token string, keyPair KeyPair) (*TokenRequest, error)` - Validates a JWT token with key pair
-- `ValidateOpaqueWithKeyPair(token string, keyPair KeyPair) (*TokenRequest, error)` - Validates an opaque token with key pair
 
 #### KeyManager Functions
 - `NewKeyManager(config KeyRotationConfig) (*KeyManager, error)` - Creates a new KeyManager
@@ -1048,7 +853,6 @@ go test -v -cover
 ### Test Coverage
 
 - ✅ **JWT Token Tests**: 15+ tests covering all signing methods
-- ✅ **Opaque Token Tests**: 10+ tests for custom token functionality
 - ✅ **Refresh Token Tests**: 10+ tests for refresh token functionality and security
 - ✅ **KeyManager Tests**: 9+ tests for key rotation and persistence
 - ✅ **TokenBuilder Tests**: 15+ tests for method chaining
